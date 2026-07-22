@@ -4,16 +4,32 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Shield, AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
   Wifi, WifiOff, Filter, Search, LayoutDashboard, Table2,
-  Target, KeyRound, Zap, Activity, ArrowUpRight,
+  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair,
 } from "lucide-react";
 import OrbitsViewer from "@/components/OrbitsViewer";
 import CorridorMap from "@/components/CorridorMap";
 import BPlaneDiagram from "@/components/BPlaneDiagram";
 import YarkovskyScatter from "@/components/YarkovskyScatter";
 import ObjectDossier from "@/components/ObjectDossier";
+import ApproachTimeline from "@/components/ApproachTimeline";
+import RiskMatrix from "@/components/RiskMatrix";
 import type { AdvancedThreat, ThreatsApiResponse } from "@/lib/engine/types";
 
-type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin";
+type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk";
+
+interface ApproachData {
+  designation: string;
+  nextApproachDate: string;
+  nextApproachLD: number;
+  nextApproachKm: number;
+  nextApproachVelocityKmS: number;
+  approachesWithin10LD: number;
+  approachesWithin1LD: number;
+  minDistanceLD: number;
+  minDistanceDate: string;
+  moidAU?: number | null;
+  allApproaches: Array<{ approachDate: string; distLD: number; vRelKmS: number }>;
+}
 
 function sci(val: number): string {
   if (!val || val === 0) return "—";
@@ -36,6 +52,7 @@ export default function Home() {
   const [filter, setFilter] = useState<"BOTH" | "ALL" | "NASA_ONLY" | "ESA_ONLY">("BOTH");
   const [query, setQuery] = useState("");
   const [utc, setUtc] = useState("--:--:--");
+  const [approachData, setApproachData] = useState<ApproachData[]>([]);
 
   useEffect(() => {
     const f = () => setUtc(new Date().toISOString().slice(11, 19));
@@ -63,6 +80,21 @@ export default function Home() {
     const iv = setInterval(fetchThreats, 5 * 60 * 1000);
     return () => clearInterval(iv);
   }, [fetchThreats]);
+
+  // Fetch close approach data (non-blocking, separate from main threats)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/approaches", { cache: "no-store" });
+        if (res.ok) {
+          const json = await res.json();
+          if (json.approaches) setApproachData(json.approaches);
+        }
+      } catch {
+        /* non-critical — approaches tab will show empty state */
+      }
+    })();
+  }, []);
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -107,9 +139,11 @@ export default function Home() {
   const TABS: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
     { id: "overview", label: "OVERVIEW", icon: <LayoutDashboard size={11} /> },
     { id: "matrix", label: "MATRIX", icon: <Table2 size={11} /> },
+    { id: "approaches", label: "APPROACHES", icon: <Radar size={11} /> },
     { id: "corridors", label: "CORRIDORS", icon: <Target size={11} /> },
     { id: "keyholes", label: "KEYHOLES", icon: <KeyRound size={11} /> },
     { id: "yarkovsky", label: "YARKOVSKY", icon: <Zap size={11} /> },
+    { id: "risk", label: "RISK MATRIX", icon: <Crosshair size={11} /> },
     { id: "rubin", label: "RUBIN FEED", icon: <Activity size={11} /> },
   ];
 
@@ -127,7 +161,7 @@ export default function Home() {
               <h1 className="text-base sm:text-lg font-black tracking-tight text-white leading-none truncate">
                 AEGIS<span className="text-cyan-400">·</span>SENTRY
                 <span className="ml-2 text-[10px] sm:text-xs font-normal text-zinc-500 tracking-wide">READINESS ENGINE</span>
-                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.0</span>
+                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.1</span>
               </h1>
               <p className="text-[8px] sm:text-[9px] font-mono text-zinc-600 tracking-[0.15em] uppercase mt-0.5 truncate">
                 NASA Sentry-II ↔ ESA NEOCC/Aegis ↔ Rubin LSST Triage
@@ -175,7 +209,8 @@ export default function Home() {
               <p style={{ animationDelay: "0.45s" }}>▸ YARKOVSKY SENSITIVITY FIELD</p>
               <p style={{ animationDelay: "0.6s" }}>▸ KEYHOLE RESONANCE SCAN</p>
               <p style={{ animationDelay: "0.75s" }}>▸ CORRIDOR GROUND-TRACK SWEEP</p>
-              <p className="text-emerald-400" style={{ animationDelay: "0.9s" }}>▸ READINESS ENGINE READY</p>
+              <p style={{ animationDelay: "0.85s" }}>▸ CLOSE APPROACH RADAR (CAD)</p>
+              <p className="text-emerald-400" style={{ animationDelay: "0.95s" }}>▸ READINESS ENGINE READY</p>
             </div>
           </div>
         )}
@@ -229,6 +264,7 @@ export default function Home() {
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-amber-400/70">YARKOVSKY</span> {md?.ysiDominantCount} σ-dominated orbits</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-purple-400/70">KEYHOLE</span> {md?.keyholeAlertCount} resonance alerts</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-red-400/70">CORRIDOR</span> {md?.corridorCount} ground tracks projected</p>
+                      <p><span className="text-zinc-700">[{utc}]</span> <span className="text-cyan-400/70">CAD</span> {approachData.length} close approaches tracked</p>
                     </div>
                   </div>
                 </div>
@@ -285,6 +321,37 @@ export default function Home() {
                       </tbody>
                     </table>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* APPROACHES — NEW TAB */}
+            {tab === "approaches" && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "520px" }}>
+                  {approachData.length > 0 ? (
+                    <ApproachTimeline
+                      approaches={approachData}
+                      onSelect={(des) => {
+                        const found = data?.threats.find((t) => t.designation === des);
+                        if (found) openDossier(found);
+                      }}
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <div className="text-center">
+                        <Radar size={24} className="text-zinc-700 mx-auto mb-2 animate-pulse" />
+                        <p className="font-mono text-[10px] text-zinc-600">LOADING CLOSE APPROACH DATA FROM NASA CAD...</p>
+                        <p className="font-mono text-[8px] text-zinc-700 mt-1">ssd-api.jpl.nasa.gov/cad.api</p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <MiniKpi label="APPROACHES TRACKED" value={String(approachData.length)} color="text-cyan-400" />
+                  <MiniKpi label="WITHIN 10 LD" value={String(approachData.filter((a) => a.approachesWithin10LD > 0).length)} color="text-amber-400" />
+                  <MiniKpi label="WITHIN 1 LD" value={String(approachData.filter((a) => a.approachesWithin1LD > 0).length)} color="text-red-400" />
+                  <MiniKpi label="NEAREST" value={approachData.length > 0 ? `${Math.min(...approachData.map((a) => a.nextApproachLD)).toFixed(2)} LD` : "—"} color="text-red-400" />
                 </div>
               </div>
             )}
@@ -349,6 +416,21 @@ export default function Home() {
               </div>
             )}
 
+            {/* RISK MATRIX — NEW TAB */}
+            {tab === "risk" && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "520px" }}>
+                  <RiskMatrix threats={data.threats} selected={selected} onSelect={openDossier} />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <MiniKpi label="PS > 0 (CONCERNING)" value={String(data.threats.filter((t) => t.palermoNasaRecomputed > 0).length)} color="text-red-400" />
+                  <MiniKpi label="PS > -2 (MONITOR)" value={String(data.threats.filter((t) => t.palermoNasaRecomputed > -2).length)} color="text-amber-400" />
+                  <MiniKpi label="ENERGY > 1 Mt" value={String(data.threats.filter((t) => t.nasa.energyMt > 1).length)} color="text-orange-400" />
+                  <MiniKpi label="ENERGY > 1000 Mt" value={String(data.threats.filter((t) => t.nasa.energyMt > 1000).length)} color="text-red-400" />
+                </div>
+              </div>
+            )}
+
             {/* RUBIN FEED */}
             {tab === "rubin" && (
               <div className="rounded-lg border border-zinc-800/50 bg-[#080810]/50 overflow-hidden">
@@ -383,8 +465,8 @@ export default function Home() {
       {/* FOOTER */}
       <footer className="border-t border-zinc-800/30 px-5 py-2 mt-2">
         <div className="max-w-[1920px] mx-auto flex flex-wrap justify-between gap-2 text-[7px] font-mono text-zinc-800">
-          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002</span>
-          <span>ENGINE v3.0 • NOT FOR OPERATIONAL USE</span>
+          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026</span>
+          <span>ENGINE v3.1 • NOT FOR OPERATIONAL USE</span>
         </div>
       </footer>
 
@@ -399,6 +481,15 @@ function Kpi({ label, value, color }: { label: string; value: number; color: str
     <div className="rounded-md border border-zinc-800/40 bg-[#080810]/50 px-2 py-1.5">
       <p className="text-[7px] font-mono text-zinc-700 uppercase tracking-wider truncate">{label}</p>
       <p className={`font-mono text-sm sm:text-base font-bold ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function MiniKpi({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div className="rounded-md border border-zinc-800/40 bg-[#080810]/50 px-2.5 py-2">
+      <p className="text-[7px] font-mono text-zinc-700 uppercase tracking-wider">{label}</p>
+      <p className={`font-mono text-sm font-bold ${color}`}>{value}</p>
     </div>
   );
 }
