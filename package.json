@@ -1,0 +1,32 @@
+{
+  "name": "aegis-sentry-divergence-watch",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Scientifically rigorous planetary defense risk divergence engine: NASA Sentry-II (IOBS) vs ESA NEOCC/Aegis (LOV) with true Keplerian propagation and Yarkovsky perturbation modeling",
+  "scripts": {
+    "dev": "next dev",
+    "build": "node scripts/copy-cesium-assets.js && next build",
+    "start": "next start",
+    "lint": "next lint",
+    "postinstall": "node scripts/copy-cesium-assets.js"
+  },
+  "dependencies": {
+    "next": "^14.2.15",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "cesium": "^1.122.0",
+    "lucide-react": "^0.454.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.9.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.15",
+    "typescript": "^5.6.3",
+    "tsx": "^4.19.0"
+  }
+}
