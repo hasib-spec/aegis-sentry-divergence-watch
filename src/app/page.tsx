@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Shield, AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
   Wifi, WifiOff, Filter, Search, LayoutDashboard, Table2,
-  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair, Rocket, Clock, Eye, Share2,
+  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair, Rocket, Clock, Eye, Share2, Bell,
 } from "lucide-react";
 import OrbitsViewer from "@/components/OrbitsViewer";
 import CorridorMap from "@/components/CorridorMap";
@@ -17,10 +17,12 @@ import DeflectionPlanner from "@/components/DeflectionPlanner";
 import RiskTimeline from "@/components/RiskTimeline";
 import BlindSpotMap from "@/components/BlindSpotMap";
 import ThreatCard from "@/components/ThreatCard"; /* v3.5 */
+import LiveFeed from "@/components/LiveFeed"; /* v4.0 */
+import Orbital3D from "@/components/Orbital3D"; /* v4.0 */
 import { computeConsensus } from "@/lib/engine/consensus"; /* v3.5 */
 import type { AdvancedThreat, ThreatsApiResponse } from "@/lib/engine/types";
 
-type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk" | "deflect" | "timeline" | "blindspot";
+type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk" | "deflect" | "timeline" | "blindspot" | "live" | "3d";
 
 interface ApproachData {
   designation: string;
@@ -215,6 +217,8 @@ export default function Home() {
     { id: "deflect", label: "DEFLECTION", icon: <Rocket size={11} /> },
     { id: "timeline", label: "TIMELINE", icon: <Clock size={11} /> },
     { id: "blindspot", label: "BLIND SPOT", icon: <Eye size={11} /> },
+    { id: "live", label: "LIVE FEED", icon: <Bell size={11} /> },
+    { id: "3d", label: "3D ORBITS", icon: <Activity size={11} /> },
     { id: "rubin", label: "RUBIN FEED", icon: <Activity size={11} /> },
   ];
 
@@ -232,7 +236,7 @@ export default function Home() {
               <h1 className="text-base sm:text-lg font-black tracking-tight text-white leading-none truncate">
                 AEGIS<span className="text-cyan-400">·</span>SENTRY
                 <span className="ml-2 text-[10px] sm:text-xs font-normal text-zinc-500 tracking-wide">READINESS ENGINE</span>
-                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.5</span>
+                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v4.0</span>
               </h1>
               <p className="text-[8px] sm:text-[9px] font-mono text-zinc-600 tracking-[0.15em] uppercase mt-0.5 truncate">
                 NASA Sentry-II ↔ ESA NEOCC/Aegis ↔ Rubin LSST Triage
@@ -285,7 +289,8 @@ export default function Home() {
               <p style={{ animationDelay: "0.95s" }}>▸ RISK EVOLUTION + ARC TRACKER</p>
               <p style={{ animationDelay: "1s" }}>▸ MONTE CARLO CORRIDOR + BLIND SPOT</p>
               <p style={{ animationDelay: "1.05s" }}>▸ CONSENSUS ENGINE + PUBLIC API</p>
-              <p className="text-emerald-400" style={{ animationDelay: "1.1s" }}>▸ READINESS ENGINE READY</p>
+              <p style={{ animationDelay: "1.1s" }}>▸ LIVE FEED + 3D ORBITAL VIEWER</p>
+              <p className="text-emerald-400" style={{ animationDelay: "1.15s" }}>▸ READINESS ENGINE READY</p>
             </div>
           </div>
         )}
@@ -369,6 +374,8 @@ export default function Home() {
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-cyan-400/70">TIMELINE</span> risk evolution + arc tracker online</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-purple-400/70">MC-CORRIDOR</span> Cholesky sampler + blind spot mapper online</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-emerald-400/70">CONSENSUS</span> multi-agency agreement engine v3.5 online</p>
+                      <p><span className="text-zinc-700">[{utc}]</span> <span className="text-cyan-400/70">LIVE FEED</span> real-time alert stream v4.0 online</p>
+                      <p><span className="text-zinc-700">[{utc}]</span> <span className="text-emerald-400/70">3D ORBITS</span> WebGL orbital renderer v4.0 online</p>
                     </div>
                   </div>
                 </div>
@@ -410,7 +417,6 @@ export default function Home() {
                           const isSel = selected?.designation === t.designation;
                           const sev = t.divergenceSeverity;
                           const sevCls = sev === "CRITICAL" ? "text-red-400 bg-red-500/10" : sev === "HIGH" ? "text-orange-400 bg-orange-500/10" : sev === "MODERATE" ? "text-amber-400 bg-amber-500/10" : sev === "LOW" ? "text-emerald-400 bg-emerald-500/10" : "text-zinc-600 bg-zinc-800/30";
-                          const cScore = consensusMap.get(t.designation);
                           return (
                             <tr key={`${t.designation}-${i}`} onClick={() => openDossier(t)} className={`border-b border-zinc-800/20 cursor-pointer transition-colors ${isSel ? "bg-cyan-500/[0.05]" : "hover:bg-zinc-800/20"}`}>
                               <td className="px-2.5 py-1.5"><span className="font-mono text-[11px] text-zinc-200">{t.designation}</span><span className="block text-[8px] text-zinc-700 truncate max-w-[130px]">{t.fullname}</span></td>
@@ -602,6 +608,20 @@ export default function Home() {
               </div>
             )}
 
+            {/* LIVE FEED — Phase 4.0 */}
+            {tab === "live" && (
+              <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "560px" }}>
+                <LiveFeed />
+              </div>
+            )}
+
+            {/* 3D ORBITS — Phase 4.0 */}
+            {tab === "3d" && (
+              <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "560px" }}>
+                <Orbital3D threats={data.threats} selected={selected} onSelect={openDossier} />
+              </div>
+            )}
+
             {/* RUBIN FEED */}
             {tab === "rubin" && (
               <div className="rounded-lg border border-zinc-800/50 bg-[#080810]/50 overflow-hidden">
@@ -637,7 +657,7 @@ export default function Home() {
       <footer className="border-t border-zinc-800/30 px-5 py-2 mt-2">
         <div className="max-w-[1920px] mx-auto flex flex-wrap justify-between gap-2 text-[7px] font-mono text-zinc-800">
           <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026 • DEFLECTION: CARUSI 2002 / DART β=3.61 • ARC: BOWELL 2002 • RISK EVOLUTION: CHESLEY 2005 • MC-CORRIDOR: MUINONEN 2001 • CHOLESKY: PRESS 2007 • BLIND SPOT: NASA OIG IG-25-006 • CONSENSUS: FENUCCI 2024 §7.4</span>
-          <span>ENGINE v3.5 • NOT FOR OPERATIONAL USE • API: /api/docs</span>
+          <span>ENGINE v4.0 • NOT FOR OPERATIONAL USE • API: /api/docs</span>
         </div>
       </footer>
 
