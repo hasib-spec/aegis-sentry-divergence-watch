@@ -7,7 +7,6 @@ import type { DivergenceMetrics } from "@/lib/engine/types";
 declare global {
   interface Window {
     Cesium: any;
-    CESIUM_BASE_URL: string;
   }
 }
 
@@ -31,35 +30,38 @@ export default function OrbitsViewer({ threats, selected }: Props) {
       if (!mounted) return;
       attempts++;
 
-      if (window.Cesium && containerRef.current) {
+      const el = containerRef.current;
+      const hasSize = el && el.clientWidth > 0 && el.clientHeight > 0;
+      const hasCesium = typeof window !== "undefined" && window.Cesium;
+
+      if (hasCesium && hasSize) {
         try {
           initViewer();
         } catch (err) {
-          if (mounted) {
-            setError(err instanceof Error ? err.message : "Init failed");
-          }
+          if (mounted) setError(err instanceof Error ? err.message : "Init failed");
         }
         return;
       }
 
-      if (attempts > 50) {
-        if (mounted) setError("CesiumJS CDN failed to load");
+      if (attempts > 100) {
+        if (mounted) setError("CesiumJS or container not ready");
         return;
       }
 
-      setTimeout(waitForCesium, 200);
+      setTimeout(waitForCesium, 150);
     }
 
     function initViewer() {
       const Cesium = window.Cesium;
-      if (!Cesium || !containerRef.current) return;
+      const el = containerRef.current;
+      if (!Cesium || !el) return;
 
       if (viewerRef.current) {
-        viewerRef.current.destroy();
+        try { viewerRef.current.destroy(); } catch { /* */ }
         viewerRef.current = null;
       }
 
-      const viewer = new Cesium.Viewer(containerRef.current, {
+      const viewer = new Cesium.Viewer(el, {
         animation: false,
         timeline: false,
         baseLayerPicker: false,
@@ -73,12 +75,13 @@ export default function OrbitsViewer({ threats, selected }: Props) {
         selectionIndicator: false,
         creditContainer: document.createElement("div"),
         baseLayer: false,
+        requestRenderMode: true,
+        maximumRenderTimeChange: Infinity,
       });
 
       viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#0a1628");
       viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#030308");
       viewer.scene.globe.showGroundAtmosphere = false;
-
       if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
       if (viewer.scene.sun) viewer.scene.sun.show = false;
       if (viewer.scene.moon) viewer.scene.moon.show = false;
@@ -91,16 +94,14 @@ export default function OrbitsViewer({ threats, selected }: Props) {
       setReady(true);
     }
 
-    waitForCesium();
+    // Wait 500ms for DOM layout to settle, then start polling
+    const startDelay = setTimeout(() => waitForCesium(), 500);
 
     return () => {
       mounted = false;
+      clearTimeout(startDelay);
       if (viewerRef.current) {
-        try {
-          viewerRef.current.destroy();
-        } catch {
-          /* */
-        }
+        try { viewerRef.current.destroy(); } catch { /* */ }
         viewerRef.current = null;
       }
     };
@@ -113,95 +114,82 @@ export default function OrbitsViewer({ threats, selected }: Props) {
     const viewer = viewerRef.current;
 
     for (const entity of entitiesRef.current) {
-      viewer.entities.remove(entity);
+      try { viewer.entities.remove(entity); } catch { /* */ }
     }
     entitiesRef.current = [];
 
     const SCALE = 1e5;
-    const items = threats
-      .filter((t) => t.nasaPosition || t.esaPosition)
-      .slice(0, 40);
+    const items = threats.filter((t) => t.nasaPosition || t.esaPosition).slice(0, 40);
 
-    for (let i = 0; i < items.length; i++) {
-      const t = items[i];
+    for (const t of items) {
       const isSel = selected?.designation === t.designation;
 
       if (t.nasaPosition) {
         const p = t.nasaPosition;
-        entitiesRef.current.push(
-          viewer.entities.add({
-            position: new Cesium.Cartesian3(p.x / SCALE, p.y / SCALE, p.z / SCALE),
-            point: {
-              pixelSize: isSel ? 10 : 5,
-              color: Cesium.Color.fromCssColorString("#00e5ff").withAlpha(isSel ? 1 : 0.6),
-              outlineColor: Cesium.Color.WHITE.withAlpha(0.3),
-              outlineWidth: 1,
-            },
-          })
-        );
+        entitiesRef.current.push(viewer.entities.add({
+          position: new Cesium.Cartesian3(p.x / SCALE, p.y / SCALE, p.z / SCALE),
+          point: {
+            pixelSize: isSel ? 10 : 5,
+            color: Cesium.Color.fromCssColorString("#00e5ff").withAlpha(isSel ? 1 : 0.6),
+            outlineColor: Cesium.Color.WHITE.withAlpha(0.3),
+            outlineWidth: 1,
+          },
+        }));
       }
 
       if (t.esaPosition) {
         const p = t.esaPosition;
-        entitiesRef.current.push(
-          viewer.entities.add({
-            position: new Cesium.Cartesian3(p.x / SCALE, p.y / SCALE, p.z / SCALE),
-            point: {
-              pixelSize: isSel ? 10 : 4,
-              color: Cesium.Color.fromCssColorString("#ff6d00").withAlpha(isSel ? 1 : 0.5),
-              outlineColor: Cesium.Color.WHITE.withAlpha(0.2),
-              outlineWidth: 1,
-            },
-          })
-        );
+        entitiesRef.current.push(viewer.entities.add({
+          position: new Cesium.Cartesian3(p.x / SCALE, p.y / SCALE, p.z / SCALE),
+          point: {
+            pixelSize: isSel ? 10 : 4,
+            color: Cesium.Color.fromCssColorString("#ff6d00").withAlpha(isSel ? 1 : 0.5),
+            outlineColor: Cesium.Color.WHITE.withAlpha(0.2),
+            outlineWidth: 1,
+          },
+        }));
       }
 
       if (t.nasaPosition && t.esaPosition && t.spatialDivergenceKm > 0) {
-        entitiesRef.current.push(
-          viewer.entities.add({
-            polyline: {
-              positions: [
-                new Cesium.Cartesian3(t.nasaPosition.x / SCALE, t.nasaPosition.y / SCALE, t.nasaPosition.z / SCALE),
-                new Cesium.Cartesian3(t.esaPosition.x / SCALE, t.esaPosition.y / SCALE, t.esaPosition.z / SCALE),
-              ],
-              width: isSel ? 3 : 1,
-              material: Cesium.Color.fromCssColorString("#ff0044").withAlpha(isSel ? 0.9 : 0.3),
-            },
-          })
-        );
+        entitiesRef.current.push(viewer.entities.add({
+          polyline: {
+            positions: [
+              new Cesium.Cartesian3(t.nasaPosition.x / SCALE, t.nasaPosition.y / SCALE, t.nasaPosition.z / SCALE),
+              new Cesium.Cartesian3(t.esaPosition.x / SCALE, t.esaPosition.y / SCALE, t.esaPosition.z / SCALE),
+            ],
+            width: isSel ? 3 : 1,
+            material: Cesium.Color.fromCssColorString("#ff0044").withAlpha(isSel ? 0.9 : 0.3),
+          },
+        }));
       }
 
       if (isSel && t.nasaPosition) {
-        entitiesRef.current.push(
-          viewer.entities.add({
-            position: new Cesium.Cartesian3(t.nasaPosition.x / SCALE, t.nasaPosition.y / SCALE, t.nasaPosition.z / SCALE),
-            label: {
-              text: `${t.designation}\nΔPS: ${t.palermoDelta.toFixed(3)} | Δr: ${t.spatialDivergenceKm.toFixed(0)} km`,
-              font: "11px monospace",
-              fillColor: Cesium.Color.WHITE,
-              outlineColor: Cesium.Color.BLACK,
-              outlineWidth: 2,
-              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-              pixelOffset: new Cesium.Cartesian2(15, -15),
-              showBackground: true,
-              backgroundColor: Cesium.Color.fromCssColorString("#0a0a12").withAlpha(0.95),
-            },
-          })
-        );
+        entitiesRef.current.push(viewer.entities.add({
+          position: new Cesium.Cartesian3(t.nasaPosition.x / SCALE, t.nasaPosition.y / SCALE, t.nasaPosition.z / SCALE),
+          label: {
+            text: `${t.designation}\nΔPS: ${t.palermoDelta.toFixed(3)} | Δr: ${t.spatialDivergenceKm.toFixed(0)} km`,
+            font: "11px monospace",
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK,
+            outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(15, -15),
+            showBackground: true,
+            backgroundColor: Cesium.Color.fromCssColorString("#0a0a12").withAlpha(0.95),
+          },
+        }));
       }
     }
 
-    entitiesRef.current.push(
-      viewer.entities.add({
-        position: Cesium.Cartesian3.ZERO,
-        point: {
-          pixelSize: 12,
-          color: Cesium.Color.fromCssColorString("#ffdd00"),
-          outlineColor: Cesium.Color.fromCssColorString("#ff8800"),
-          outlineWidth: 3,
-        },
-      })
-    );
+    entitiesRef.current.push(viewer.entities.add({
+      position: Cesium.Cartesian3.ZERO,
+      point: {
+        pixelSize: 12,
+        color: Cesium.Color.fromCssColorString("#ffdd00"),
+        outlineColor: Cesium.Color.fromCssColorString("#ff8800"),
+        outlineWidth: 3,
+      },
+    }));
 
     viewer.scene.requestRender();
   }, [threats, selected, ready]);
@@ -210,23 +198,27 @@ export default function OrbitsViewer({ threats, selected }: Props) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-[#030308]">
         <div className="text-center p-6">
-          <AlertTriangle className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
-          <p className="font-mono text-xs text-zinc-500">WEBGL OFFLINE</p>
-          <p className="font-mono text-[10px] text-zinc-700 mt-1">{error}</p>
+          <AlertTriangle className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
+          <p className="font-mono text-[10px] text-zinc-600">{error}</p>
+          <p className="font-mono text-[9px] text-zinc-700 mt-1">Globe requires WebGL2. Data table still works.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="w-full h-full relative">
-      <div ref={containerRef} className="w-full h-full" />
+    <div className="w-full h-full relative" style={{ minHeight: "300px" }}>
+      <div
+        ref={containerRef}
+        className="w-full h-full absolute inset-0"
+        style={{ width: "100%", height: "100%" }}
+      />
       {!ready && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#030308]">
-          <Orbit className="w-8 h-8 text-cyan-400 animate-spin" style={{ animationDuration: "2s" }} />
+        <div className="absolute inset-0 flex items-center justify-center bg-[#030308] z-10">
+          <Orbit className="w-7 h-7 text-cyan-400 animate-spin" style={{ animationDuration: "2s" }} />
         </div>
       )}
-      <div className="absolute bottom-3 left-3 z-10 flex items-center gap-3">
+      <div className="absolute bottom-3 left-3 z-20 flex items-center gap-3">
         <span className="flex items-center gap-1 text-[9px] font-mono text-cyan-400/70">
           <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" /> NASA
         </span>
