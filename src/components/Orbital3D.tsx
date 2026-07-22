@@ -1,80 +1,139 @@
 "use client";
 
 import { useEffect, useRef, useCallback, useState } from "react";
-import type { DivergenceMetrics } from "@/lib/engine/types";
+import type { AdvancedThreat } from "@/lib/engine/types";
 
+/* ═══════════════════════════════════════════════════════════
+   FIX: Props now use AdvancedThreat (not DivergenceMetrics)
+   so that onSelect matches openDossier's signature in page.tsx
+   ═══════════════════════════════════════════════════════════ */
 interface Props {
-  threats: DivergenceMetrics[];
-  selected: DivergenceMetrics | null;
-  onSelect?: (t: DivergenceMetrics) => void;
+  threats: AdvancedThreat[];
+  selected: AdvancedThreat | null;
+  onSelect?: (t: AdvancedThreat) => void;
 }
 
 interface Orbit3D {
   designation: string;
-  a: number;
-  e: number;
-  inclination: number;
-  omega: number;
-  w: number;
-  phase: number;
+  a: number;       // semi-major axis (scaled px)
+  e: number;       // eccentricity
+  incl: number;    // inclination (rad, for 3D tilt)
+  omega: number;   // longitude of ascending node (rad)
+  phase: number;   // initial phase angle
+  speed: number;   // angular speed multiplier
   color: string;
-  isSelected: boolean;
+  severity: string;
+  ysi: number;
+  rrs: number;
 }
 
-/**
- * Canvas-based 3D orbital visualization with perspective projection.
- * No Three.js dependency. Pure Canvas 2D with manual 3D math.
- *
- * Features:
- * - Perspective projection with proper depth sorting
- * - Auto-rotating camera with mouse drag
- * - Depth-based opacity and size
- * - Orbit trails with gradient
- * - Star field background
- */
+const SEV_COLORS: Record<string, string> = {
+  CRITICAL: "248,113,113",
+  HIGH: "251,146,60",
+  MODERATE: "251,191,36",
+  LOW: "52,211,153",
+  NEGLIGIBLE: "100,116,139",
+};
+
 export default function Orbital3D({ threats, selected, onSelect }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animRef = useRef<number>(0);
   const timeRef = useRef<number>(0);
-  const rotationRef = useRef({ x: 0.4, y: 0 });
-  const dragRef = useRef({ dragging: false, lastX: 0, lastY: 0 });
-  const [hovered, setHovered] = useState<string | null>(null);
+  const dragRef = useRef<{ dragging: boolean; lastX: number; lastY: number }>({
+    dragging: false,
+    lastX: 0,
+    lastY: 0,
+  });
+  const rotRef = useRef<{ rx: number; ry: number }>({ rx: -0.45, ry: 0.3 });
+  const zoomRef = useRef<number>(1);
+  const [hover, setHover] = useState<AdvancedThreat | null>(null);
+  const hitRef = useRef<Array<{ x: number; y: number; threat: AdvancedThreat }>>([]);
 
+  /* ── 3D projection helpers ── */
   const project = useCallback(
     (
-      x: number,
-      y: number,
-      z: number,
-      W: number,
-      H: number,
-      rotX: number,
-      rotY: number
-    ): { sx: number; sy: number; depth: number } => {
+      x3: number,
+      y3: number,
+      z3: number,
+      cx: number,
+      cy: number,
+      scale: number
+    ): [number, number, number] => {
+      const { rx, ry } = rotRef.current;
+      const zoom = zoomRef.current;
       // Rotate around Y axis
-      const cosY = Math.cos(rotY);
-      const sinY = Math.sin(rotY);
-      const x1 = x * cosY - z * sinY;
-      const z1 = x * sinY + z * cosY;
-
+      const cosY = Math.cos(ry);
+      const sinY = Math.sin(ry);
+      let x1 = x3 * cosY - z3 * sinY;
+      let z1 = x3 * sinY + z3 * cosY;
+      let y1 = y3;
       // Rotate around X axis
-      const cosX = Math.cos(rotX);
-      const sinX = Math.sin(rotX);
-      const y1 = y * cosX - z1 * sinX;
-      const z2 = y * sinX + z1 * cosX;
-
-      // Perspective projection
-      const fov = 800;
-      const scale = fov / (fov + z2 + 500);
-
-      return {
-        sx: W / 2 + x1 * scale,
-        sy: H / 2 + y1 * scale,
-        depth: z2,
-      };
+      const cosX = Math.cos(rx);
+      const sinX = Math.sin(rx);
+      let y2 = y1 * cosX - z1 * sinX;
+      let z2 = y1 * sinX + z1 * cosX;
+      let x2 = x1;
+      // Simple perspective
+      const perspective = 800;
+      const pFactor = perspective / (perspective + z2 * scale * zoom);
+      const sx = cx + x2 * scale * zoom * pFactor;
+      const sy = cy + y2 * scale * zoom * pFactor;
+      return [sx, sy, z2];
     },
     []
   );
 
+  /* ── Mouse handlers ── */
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    dragRef.current = { dragging: true, lastX: e.clientX, lastY: e.clientY };
+  }, []);
+
+  const handleMouseMove = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (dragRef.current.dragging) {
+        const dx = e.clientX - dragRef.current.lastX;
+        const dy = e.clientY - dragRef.current.lastY;
+        rotRef.current.ry += dx * 0.005;
+        rotRef.current.rx += dy * 0.005;
+        rotRef.current.rx = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotRef.current.rx));
+        dragRef.current.lastX = e.clientX;
+        dragRef.current.lastY = e.clientY;
+        return;
+      }
+      // Hover detection
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const mx = e.clientX - rect.left;
+      const my = e.clientY - rect.top;
+      let best: AdvancedThreat | null = null;
+      let bestD = 16;
+      for (const h of hitRef.current) {
+        const d = Math.hypot(h.x - mx, h.y - my);
+        if (d < bestD) {
+          bestD = d;
+          best = h.threat;
+        }
+      }
+      setHover(best);
+    },
+    []
+  );
+
+  const handleMouseUp = useCallback(() => {
+    dragRef.current.dragging = false;
+  }, []);
+
+  const handleClick = useCallback(() => {
+    if (hover && onSelect) onSelect(hover);
+  }, [hover, onSelect]);
+
+  const handleWheel = useCallback((e: React.WheelEvent) => {
+    e.preventDefault();
+    zoomRef.current = Math.max(0.3, Math.min(3, zoomRef.current - e.deltaY * 0.001));
+  }, []);
+
+  /* ── Main draw loop ── */
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -96,189 +155,305 @@ export default function Orbital3D({ threats, selected, onSelect }: Props) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const t = timeRef.current;
-    const rotX = rotationRef.current.x;
-    const rotY = rotationRef.current.y + t * 0.1;
+    const cx = W / 2;
+    const cy = H / 2;
+    const baseScale = Math.min(W, H) * 0.32;
 
     // Background
     ctx.fillStyle = "#030308";
     ctx.fillRect(0, 0, W, H);
 
-    // Star field
-    for (let i = 0; i < 200; i++) {
-      const sx = ((Math.sin(i * 127.1 + 42) * 0.5 + 0.5) * W);
-      const sy = ((Math.cos(i * 311.7 + 42) * 0.5 + 0.5) * H);
-      const brightness = 0.05 + 0.1 * Math.sin(t * 0.3 + i * 0.7);
+    // Starfield
+    for (let i = 0; i < 150; i++) {
+      const sx = (Math.sin(i * 127.1 + 42) * 0.5 + 0.5) * W;
+      const sy = (Math.cos(i * 311.7 + 42) * 0.5 + 0.5) * H;
+      const brightness = 0.08 + 0.12 * Math.sin(t * 0.4 + i * 0.7);
       ctx.fillStyle = `rgba(255,255,255,${brightness})`;
       ctx.fillRect(sx, sy, 1, 1);
     }
 
-    const scale = Math.min(W, H) * 0.35;
+    // ── Draw ecliptic reference grid ──
+    ctx.strokeStyle = "rgba(0,229,255,0.06)";
+    ctx.lineWidth = 0.5;
+    for (let r = 1; r <= 4; r++) {
+      const gridR = r * 0.5;
+      ctx.beginPath();
+      for (let a = 0; a <= 360; a += 5) {
+        const rad = (a * Math.PI) / 180;
+        const gx = gridR * Math.cos(rad);
+        const gz = gridR * Math.sin(rad);
+        const [px, py] = project(gx, 0, gz, cx, cy, baseScale);
+        if (a === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.stroke();
+    }
 
-    // Draw Sun
-    const sunProj = project(0, 0, 0, W, H, rotX, rotY);
-    const sunGrad = ctx.createRadialGradient(
-      sunProj.sx, sunProj.sy, 0,
-      sunProj.sx, sunProj.sy, 15
-    );
-    sunGrad.addColorStop(0, "rgba(255,220,0,0.9)");
-    sunGrad.addColorStop(0.5, "rgba(255,140,0,0.4)");
+    // ── Sun ──
+    const [sunX, sunY] = project(0, 0, 0, cx, cy, baseScale);
+    const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, 14);
+    sunGrad.addColorStop(0, "rgba(255,220,0,0.95)");
+    sunGrad.addColorStop(0.4, "rgba(255,160,0,0.5)");
     sunGrad.addColorStop(1, "rgba(255,100,0,0)");
     ctx.fillStyle = sunGrad;
     ctx.beginPath();
-    ctx.arc(sunProj.sx, sunProj.sy, 15, 0, Math.PI * 2);
+    ctx.arc(sunX, sunY, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffdd00";
+    ctx.beginPath();
+    ctx.arc(sunX, sunY, 3.5, 0, Math.PI * 2);
     ctx.fill();
 
-    // Draw Earth orbit
-    ctx.strokeStyle = "rgba(100,150,255,0.15)";
+    // ── Earth orbit (1 AU reference) ──
+    ctx.strokeStyle = "rgba(100,150,255,0.18)";
     ctx.lineWidth = 1;
-    ctx.setLineDash([3, 3]);
+    ctx.setLineDash([4, 4]);
     ctx.beginPath();
-    for (let i = 0; i <= 100; i++) {
-      const angle = (i / 100) * Math.PI * 2;
-      const ex = Math.cos(angle) * scale;
-      const ey = 0;
-      const ez = Math.sin(angle) * scale;
-      const p = project(ex, ey, ez, W, H, rotX, rotY);
-      if (i === 0) ctx.moveTo(p.sx, p.sy);
-      else ctx.lineTo(p.sx, p.sy);
+    for (let a = 0; a <= 360; a += 3) {
+      const rad = (a * Math.PI) / 180;
+      const [px, py] = project(Math.cos(rad), 0, Math.sin(rad), cx, cy, baseScale);
+      if (a === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
     }
+    ctx.closePath();
     ctx.stroke();
     ctx.setLineDash([]);
 
     // Earth position
-    const earthAngle = t * 0.2;
-    const earthX = Math.cos(earthAngle) * scale;
-    const earthZ = Math.sin(earthAngle) * scale;
-    const earthProj = project(earthX, 0, earthZ, W, H, rotX, rotY);
+    const earthAngle = t * 0.15;
+    const [earthX, earthY] = project(
+      Math.cos(earthAngle),
+      0,
+      Math.sin(earthAngle),
+      cx,
+      cy,
+      baseScale
+    );
     ctx.fillStyle = "#4488ff";
     ctx.beginPath();
-    ctx.arc(earthProj.sx, earthProj.sy, 4, 0, Math.PI * 2);
+    ctx.arc(earthX, earthY, 4, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = "rgba(68,136,255,0.25)";
+    ctx.beginPath();
+    ctx.arc(earthX, earthY, 8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.font = "8px monospace";
+    ctx.fillStyle = "rgba(100,150,255,0.6)";
+    ctx.fillText("EARTH", earthX + 10, earthY - 4);
 
-    // Draw asteroid orbits
-    const matched = threats.filter((t) => t.sourceMatch === "BOTH").slice(0, 20);
+    // ── Build orbit list from threats ──
+    const matched = threats
+      .filter((th) => th.sourceMatch === "BOTH" || th.nasa.ip > 0)
+      .slice(0, 30);
+
+    hitRef.current = [];
 
     for (let i = 0; i < matched.length; i++) {
-      const threat = matched[i];
-      const isSel = selected?.designation === threat.designation;
-      const isHov = hovered === threat.designation;
+      const th = matched[i];
+      const isSel = selected?.designation === th.designation;
+      const isHov = hover?.designation === th.designation;
 
-      const baseA = (0.6 + (i / matched.length) * 1.5) * scale;
-      const e = 0.2 + Math.min(Math.abs(threat.palermoDelta) * 0.05, 0.5);
-      const incl = (0.1 + (i % 5) * 0.15) * Math.PI;
-      const omega = (i / matched.length) * Math.PI * 2;
-      const w = (i * 1.7) % (Math.PI * 2);
-
-      const alpha = isSel || isHov ? 0.9 : 0.3;
-      const color = isSel ? "#00e5ff" : `rgba(0,229,255,${alpha})`;
-
-      // Draw orbit path
-      ctx.strokeStyle = color;
-      ctx.lineWidth = isSel ? 2 : 0.8;
-      ctx.beginPath();
-
-      const points: Array<{ sx: number; sy: number; depth: number }> = [];
-      for (let s = 0; s <= 80; s++) {
-        const theta = (s / 80) * Math.PI * 2;
-        const r = (baseA * (1 - e * e)) / (1 + e * Math.cos(theta));
-        const xOrb = r * Math.cos(theta + w);
-        const yOrb = r * Math.sin(theta + w);
-
-        // Apply inclination and node rotation
-        const x3d = xOrb * Math.cos(omega) - yOrb * Math.cos(incl) * Math.sin(omega);
-        const y3d = yOrb * Math.sin(incl);
-        const z3d = xOrb * Math.sin(omega) + yOrb * Math.cos(incl) * Math.cos(omega);
-
-        const p = project(x3d, y3d, z3d, W, H, rotX, rotY);
-        points.push(p);
-        if (s === 0) ctx.moveTo(p.sx, p.sy);
-        else ctx.lineTo(p.sx, p.sy);
+      // Deterministic orbit params from index + designation hash
+      let h = 2166136261;
+      for (let c = 0; c < th.designation.length; c++) {
+        h ^= th.designation.charCodeAt(c);
+        h = Math.imul(h, 16777619);
       }
+      const hNorm = (h >>> 0) / 4294967295;
+
+      const a = 0.6 + hNorm * 1.6; // semi-major axis (AU, scaled)
+      const e = 0.15 + Math.min(Math.abs(th.palermoDelta) * 0.08, 0.55);
+      const incl = (0.05 + hNorm * 0.5) * (th.ysi?.ysi > 1 ? 1.3 : 1); // tilt
+      const omega = hNorm * Math.PI * 2; // node rotation
+      const speed = 0.08 + (1 / (a * a)) * 0.12; // Kepler-like speed
+      const phase = hNorm * Math.PI * 2;
+
+      const rgb = SEV_COLORS[th.divergenceSeverity] || "100,116,139";
+      const alpha = isSel || isHov ? 0.9 : 0.3;
+      const lineW = isSel ? 2 : isHov ? 1.5 : 0.7;
+
+      // ── Draw orbit ellipse in 3D ──
+      ctx.strokeStyle = `rgba(${rgb},${alpha})`;
+      ctx.lineWidth = lineW;
+      ctx.beginPath();
+      for (let s = 0; s <= 120; s++) {
+        const theta = (s / 120) * Math.PI * 2;
+        const r = (a * (1 - e * e)) / (1 + e * Math.cos(theta));
+        // Position in orbital plane
+        const xOrb = r * Math.cos(theta);
+        const yOrb = r * Math.sin(theta);
+        // Apply inclination + node rotation → 3D
+        const cosO = Math.cos(omega);
+        const sinO = Math.sin(omega);
+        const cosI = Math.cos(incl);
+        const sinI = Math.sin(incl);
+        const x3 = xOrb * cosO - yOrb * sinO * cosI;
+        const z3 = xOrb * sinO + yOrb * cosO * cosI;
+        const y3 = yOrb * sinI;
+
+        const [px, py] = project(x3, y3, z3, cx, cy, baseScale);
+        if (s === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
       ctx.stroke();
 
-      // Asteroid position
-      const astAngle = t * (0.3 + i * 0.05) + i * 2.1;
-      const astR = (baseA * (1 - e * e)) / (1 + e * Math.cos(astAngle + w));
-      const axOrb = astR * Math.cos(astAngle + w);
-      const ayOrb = astR * Math.sin(astAngle + w);
-      const ax3d = axOrb * Math.cos(omega) - ayOrb * Math.cos(incl) * Math.sin(omega);
-      const ay3d = ayOrb * Math.sin(incl);
-      const az3d = axOrb * Math.sin(omega) + ayOrb * Math.cos(incl) * Math.cos(omega);
-      const astProj = project(ax3d, ay3d, az3d, W, H, rotX, rotY);
+      // ── NASA vs ESA split (dashed orange offset) ──
+      if (th.sourceMatch === "BOTH" && Math.abs(th.palermoDelta) > 0.1) {
+        const offset = Math.min(Math.abs(th.palermoDelta) * 0.02, 0.06);
+        ctx.strokeStyle = `rgba(255,109,0,${alpha * 0.5})`;
+        ctx.lineWidth = lineW * 0.6;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath();
+        for (let s = 0; s <= 120; s++) {
+          const theta = (s / 120) * Math.PI * 2;
+          const r = (a * (1 - e * e)) / (1 + e * Math.cos(theta)) + offset;
+          const xOrb = r * Math.cos(theta + offset * 0.3);
+          const yOrb = r * Math.sin(theta + offset * 0.3);
+          const cosO = Math.cos(omega);
+          const sinO = Math.sin(omega);
+          const cosI = Math.cos(incl);
+          const sinI = Math.sin(incl);
+          const x3 = xOrb * cosO - yOrb * sinO * cosI;
+          const z3 = xOrb * sinO + yOrb * cosO * cosI;
+          const y3 = yOrb * sinI;
+          const [px, py] = project(x3, y3, z3, cx, cy, baseScale);
+          if (s === 0) ctx.moveTo(px, py);
+          else ctx.lineTo(px, py);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
 
-      const depthAlpha = Math.max(0.2, Math.min(1, 1 - astProj.depth / 1000));
-      const size = isSel ? 5 : 3;
+      // ── Asteroid position (animated) ──
+      const astTheta = t * speed + phase;
+      const astR = (a * (1 - e * e)) / (1 + e * Math.cos(astTheta));
+      const xOrb = astR * Math.cos(astTheta);
+      const yOrb = astR * Math.sin(astTheta);
+      const cosO = Math.cos(omega);
+      const sinO = Math.sin(omega);
+      const cosI = Math.cos(incl);
+      const sinI = Math.sin(incl);
+      const ax3 = xOrb * cosO - yOrb * sinO * cosI;
+      const az3 = xOrb * sinO + yOrb * cosO * cosI;
+      const ay3 = yOrb * sinI;
+      const [astX, astY, astZ] = project(ax3, ay3, az3, cx, cy, baseScale);
 
-      ctx.fillStyle = isSel
-        ? "#ffffff"
-        : `rgba(0,229,255,${depthAlpha * alpha})`;
+      // Glow for selected/hovered
+      if (isSel || isHov) {
+        const glowR = 10 + 3 * Math.sin(t * 3);
+        const glow = ctx.createRadialGradient(astX, astY, 0, astX, astY, glowR);
+        glow.addColorStop(0, `rgba(${rgb},0.6)`);
+        glow.addColorStop(1, `rgba(${rgb},0)`);
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(astX, astY, glowR, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Asteroid dot
+      const dotR = isSel ? 5 : isHov ? 4 : 2.5;
+      ctx.fillStyle = isSel || isHov ? `rgba(${rgb},1)` : `rgba(${rgb},${alpha + 0.2})`;
       ctx.beginPath();
-      ctx.arc(astProj.sx, astProj.sy, size, 0, Math.PI * 2);
+      ctx.arc(astX, astY, dotR, 0, Math.PI * 2);
       ctx.fill();
 
-      if (isSel) {
-        ctx.strokeStyle = "rgba(0,229,255,0.5)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(astProj.sx, astProj.sy, 10 + 3 * Math.sin(t * 3), 0, Math.PI * 2);
-        ctx.stroke();
-
-        ctx.font = "10px monospace";
-        ctx.fillStyle = "rgba(255,255,255,0.9)";
-        ctx.fillText(threat.designation, astProj.sx + 12, astProj.sy - 5);
-        ctx.fillStyle = "rgba(255,100,100,0.8)";
-        ctx.fillText(`ΔPS: ${threat.palermoDelta.toFixed(2)}`, astProj.sx + 12, astProj.sy + 8);
+      // Label for selected / top-5
+      if (isSel || isHov || i < 5) {
+        ctx.font = `${isSel ? "bold " : ""}${isSel ? 10 : 8}px monospace`;
+        ctx.fillStyle = isSel ? "#ffffff" : `rgba(${rgb},0.75)`;
+        ctx.fillText(th.designation, astX + 8, astY - 6);
+        if (isSel) {
+          ctx.font = "8px monospace";
+          ctx.fillStyle = "rgba(255,255,255,0.5)";
+          ctx.fillText(
+            `ΔPS ${th.palermoDelta.toFixed(2)} • YSI ${th.ysi?.ysi?.toFixed(2) ?? "—"} • RRS ${th.readiness?.score ?? "—"}`,
+            astX + 8,
+            astY + 6
+          );
+        }
       }
+
+      hitRef.current.push({ x: astX, y: astY, threat: th });
     }
 
-    // Title
+    // ── HUD ──
     ctx.font = "bold 10px monospace";
-    ctx.fillStyle = "rgba(255,255,255,0.4)";
-    ctx.fillText("3D ORBITAL PROJECTION — HELIOCENTRIC ECLIPTIC", 12, 16);
+    ctx.fillStyle = "rgba(255,255,255,0.45)";
+    ctx.fillText("3D ORBITAL DIVERGENCE — HELIOCENTRIC ECLIPTIC", 12, 16);
     ctx.font = "8px monospace";
-    ctx.fillStyle = "rgba(255,255,255,0.2)";
-    ctx.fillText("Drag to rotate • Auto-rotating", 12, 28);
+    ctx.fillStyle = "rgba(255,255,255,0.22)";
+    ctx.fillText(
+      `${matched.length} objects • drag to rotate • scroll to zoom • click to inspect`,
+      12,
+      28
+    );
+
+    // Legend
+    ctx.font = "8px monospace";
+    ctx.fillStyle = "rgba(0,229,255,0.6)";
+    ctx.fillText("— NASA Sentry-II (Yarkovsky)", 12, H - 28);
+    ctx.fillStyle = "rgba(255,109,0,0.6)";
+    ctx.fillText("--- ESA NEOCC/Aegis (Grav-only)", 12, H - 16);
+
+    // Tooltip
+    if (hover) {
+      const lines = [
+        hover.designation,
+        `NASA IP: ${hover.nasa.ip > 0 ? hover.nasa.ip.toExponential(2) : "—"}`,
+        `ESA IP: ${hover.esa.ipCum > 0 ? hover.esa.ipCum.toExponential(2) : "—"}`,
+        `ΔPS: ${hover.palermoDelta.toFixed(3)}`,
+        `YSI: ${hover.ysi?.ysi?.toFixed(2) ?? "—"} (${hover.ysi?.classification ?? "—"})`,
+        `RRS: ${hover.readiness?.score ?? "—"} (${hover.readiness?.priority ?? "—"})`,
+      ];
+      const tw = 185;
+      const th2 = lines.length * 13 + 10;
+      const p = hitRef.current.find((hh) => hh.threat === hover);
+      const tx = Math.min(W - tw - 8, (p?.x ?? 0) + 16);
+      const ty = Math.max(8, (p?.y ?? 0) - th2 - 8);
+      ctx.fillStyle = "rgba(7,7,15,0.94)";
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      ctx.fillRect(tx, ty, tw, th2);
+      ctx.strokeRect(tx, ty, tw, th2);
+      ctx.font = "9px monospace";
+      lines.forEach((ln, i) => {
+        ctx.fillStyle =
+          i === 0
+            ? "#ffffff"
+            : i === 1
+            ? "rgba(0,229,255,0.8)"
+            : i === 2
+            ? "rgba(255,109,0,0.8)"
+            : "rgba(255,255,255,0.6)";
+        ctx.fillText(ln, tx + 8, ty + 16 + i * 13);
+      });
+    }
 
     timeRef.current += 0.016;
     animRef.current = requestAnimationFrame(draw);
-  }, [threats, selected, hovered, project]);
+  }, [threats, selected, hover, project]);
 
   useEffect(() => {
     animRef.current = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(animRef.current);
   }, [draw]);
 
-  const handleMouseDown = (e: React.MouseEvent) => {
-    dragRef.current = { dragging: true, lastX: e.clientX, lastY: e.clientY };
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (dragRef.current.dragging) {
-      const dx = e.clientX - dragRef.current.lastX;
-      const dy = e.clientY - dragRef.current.lastY;
-      rotationRef.current.y += dx * 0.005;
-      rotationRef.current.x = Math.max(
-        -Math.PI / 2,
-        Math.min(Math.PI / 2, rotationRef.current.x + dy * 0.005)
-      );
-      dragRef.current.lastX = e.clientX;
-      dragRef.current.lastY = e.clientY;
-    }
-  };
-
-  const handleMouseUp = () => {
-    dragRef.current.dragging = false;
-  };
-
   return (
     <canvas
       ref={canvasRef}
-      className="w-full h-full block cursor-grab active:cursor-grabbing"
-      style={{ width: "100%", height: "100%" }}
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onMouseLeave={() => {
+        handleMouseUp();
+        setHover(null);
+      }}
+      onClick={handleClick}
+      onWheel={handleWheel}
+      className="w-full h-full block cursor-grab active:cursor-grabbing"
+      style={{ width: "100%", height: "100%" }}
     />
   );
 }
