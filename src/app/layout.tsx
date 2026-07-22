@@ -26,12 +26,14 @@ export default function RootLayout({
           href="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Widgets/widgets.css"
           rel="stylesheet"
         />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.CESIUM_BASE_URL = "https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/";`,
+          }}
+        />
+        <script src="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Cesium.js" />
       </head>
       <body className="min-h-screen bg-[#030308] text-zinc-200 antialiased">
-        <Script
-          src="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Cesium.js"
-          strategy="beforeInteractive"
-        />
         <div className="fixed inset-0 pointer-events-none z-0">
           <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-cyan-500/[0.03] rounded-full blur-[150px]" />
           <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-orange-500/[0.03] rounded-full blur-[150px]" />
