@@ -23,6 +23,11 @@ body {
   overflow-x: hidden;
 }
 
+::selection {
+  background: rgba(0, 229, 255, 0.25);
+  color: #ffffff;
+}
+
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -42,54 +47,32 @@ body {
   .panel-glass {
     @apply bg-panel/80 backdrop-blur-xl border border-panel-border rounded-lg;
   }
-  .data-readout {
-    @apply font-mono text-xs tracking-tight;
-  }
-  .nasa-accent {
-    @apply text-nasa;
-    text-shadow: 0 0 8px var(--nasa-cyan);
-  }
-  .esa-accent {
-    @apply text-esa;
-    text-shadow: 0 0 8px var(--esa-orange);
-  }
-  .divergence-bar {
-    @apply h-1.5 rounded-full transition-all duration-700 ease-out;
-  }
   .grid-overlay {
-    background-image: linear-gradient(
-        rgba(0, 229, 255, 0.03) 1px,
-        transparent 1px
-      ),
+    background-image: linear-gradient(rgba(0, 229, 255, 0.03) 1px, transparent 1px),
       linear-gradient(90deg, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
     background-size: 40px 40px;
   }
 }
 
-.cesium-viewer .cesium-viewer-toolbar {
-  display: none;
+@keyframes dossierIn {
+  from {
+    transform: translateX(40px);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
 }
-.cesium-viewer .cesium-viewer-animationContainer {
-  display: none;
+.dossier-in {
+  animation: dossierIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
-.cesium-viewer .cesium-viewer-timelineContainer {
-  display: none;
-}
-.cesium-viewer .cesium-viewer-fullscreenContainer {
-  display: none;
-}
-.cesium-viewer .cesium-viewer-vrContainer {
-  display: none;
-}
-.cesium-viewer .cesium-credit-logoContainer {
-  display: none;
-}
-.cesium-viewer .cesium-viewer-geocoderContainer {
-  display: none;
-}
-.cesium-viewer .cesium-viewer-navigationContainer {
-  display: none;
-}
-.cesium-viewer .cesium-viewer-bottom {
-  display: none;
+
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
 }
