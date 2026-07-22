@@ -27,7 +27,14 @@ interface DeflectionResult {
   };
   keyholeSafety: {
     isSafe: boolean;
-    dangerKeyholes: Array<{ resonance: string; earthOrbits: number; warning: string }>;
+    dangerKeyholes: Array<{
+      resonance: string;
+      earthOrbits: number;
+      asteroidOrbits: number;
+      xiKm: number;
+      widthKm: number;
+      sigmaOverlap: number;
+    }>;
     recommendedMissKm: number;
     warning: string;
   };
