@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Shield, AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
   Wifi, WifiOff, Filter, Search, LayoutDashboard, Table2,
-  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair, Rocket,
+  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair, Rocket, Clock, Eye,
 } from "lucide-react";
 import OrbitsViewer from "@/components/OrbitsViewer";
 import CorridorMap from "@/components/CorridorMap";
@@ -14,9 +14,11 @@ import ObjectDossier from "@/components/ObjectDossier";
 import ApproachTimeline from "@/components/ApproachTimeline";
 import RiskMatrix from "@/components/RiskMatrix";
 import DeflectionPlanner from "@/components/DeflectionPlanner";
+import RiskTimeline from "@/components/RiskTimeline";
+import BlindSpotMap from "@/components/BlindSpotMap";
 import type { AdvancedThreat, ThreatsApiResponse } from "@/lib/engine/types";
 
-type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk" | "deflect";
+type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk" | "deflect" | "timeline" | "blindspot";
 
 interface ApproachData {
   designation: string;
@@ -30,6 +32,26 @@ interface ApproachData {
   minDistanceDate: string;
   moidAU?: number | null;
   allApproaches: Array<{ approachDate: string; distLD: number; vRelKmS: number }>;
+}
+
+interface TimelineData {
+  observationArc: {
+    arc: { arcLengthDays: number; arcQuality: string; uncertaintyParameterU: number; currentSigmaArcsec: number; daysSinceLastObs: number; isStale: boolean; firstObsDate: string; lastObsDate: string };
+    lossDateYearsFromNow: number;
+    yarkovskyDominanceYears: number;
+    recommendation: string;
+    urgency: string;
+  };
+  riskEvolution: {
+    timeline: Array<{ yearsFromNow: number; ipNasa: number; ipEsa: number; palermoNasa: number; palermoEsa: number; sigmaKm: number; missDistanceKm: number; isProjection: boolean }>;
+    trend: { direction: string; ratePerYear: number; characteristicTimeYears: number; yearsToSafe: number; confidence: number };
+    nasaEsaDivergenceTrend: string;
+    peakIP: number;
+    peakIPYear: number;
+    currentIP: number;
+    recommendation: string;
+  };
+  current: { ip: number; diameterKm: number; daDtAUMyr: number; hasYarkovsky: boolean };
 }
 
 function sci(val: number): string {
@@ -54,6 +76,9 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [utc, setUtc] = useState("--:--:--");
   const [approachData, setApproachData] = useState<ApproachData[]>([]);
+  const [timelineData, setTimelineData] = useState<TimelineData | null>(null);
+  const [timelineTarget, setTimelineTarget] = useState<string>("");
+  const [timelineLoading, setTimelineLoading] = useState(false);
 
   useEffect(() => {
     const f = () => setUtc(new Date().toISOString().slice(11, 19));
@@ -90,10 +115,22 @@ export default function Home() {
           const json = await res.json();
           if (json.approaches) setApproachData(json.approaches);
         }
-      } catch {
-        /* non-critical */
-      }
+      } catch { /* non-critical */ }
     })();
+  }, []);
+
+  const fetchTimeline = useCallback(async (des: string) => {
+    if (!des) return;
+    setTimelineLoading(true);
+    setTimelineData(null);
+    try {
+      const res = await fetch(`/api/evolution?des=${encodeURIComponent(des)}`, { cache: "no-store" });
+      if (res.ok) {
+        const json = await res.json();
+        if (!json.error) setTimelineData(json);
+      }
+    } catch { /* non-critical */ }
+    finally { setTimelineLoading(false); }
   }, []);
 
   const filtered = useMemo(() => {
@@ -145,6 +182,8 @@ export default function Home() {
     { id: "yarkovsky", label: "YARKOVSKY", icon: <Zap size={11} /> },
     { id: "risk", label: "RISK MATRIX", icon: <Crosshair size={11} /> },
     { id: "deflect", label: "DEFLECTION", icon: <Rocket size={11} /> },
+    { id: "timeline", label: "TIMELINE", icon: <Clock size={11} /> },
+    { id: "blindspot", label: "BLIND SPOT", icon: <Eye size={11} /> },
     { id: "rubin", label: "RUBIN FEED", icon: <Activity size={11} /> },
   ];
 
@@ -162,7 +201,7 @@ export default function Home() {
               <h1 className="text-base sm:text-lg font-black tracking-tight text-white leading-none truncate">
                 AEGIS<span className="text-cyan-400">·</span>SENTRY
                 <span className="ml-2 text-[10px] sm:text-xs font-normal text-zinc-500 tracking-wide">READINESS ENGINE</span>
-                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.2</span>
+                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.4</span>
               </h1>
               <p className="text-[8px] sm:text-[9px] font-mono text-zinc-600 tracking-[0.15em] uppercase mt-0.5 truncate">
                 NASA Sentry-II ↔ ESA NEOCC/Aegis ↔ Rubin LSST Triage
@@ -212,7 +251,9 @@ export default function Home() {
               <p style={{ animationDelay: "0.75s" }}>▸ CORRIDOR GROUND-TRACK SWEEP</p>
               <p style={{ animationDelay: "0.85s" }}>▸ CLOSE APPROACH RADAR (CAD)</p>
               <p style={{ animationDelay: "0.9s" }}>▸ DEFLECTION Δv ENGINE</p>
-              <p className="text-emerald-400" style={{ animationDelay: "0.95s" }}>▸ READINESS ENGINE READY</p>
+              <p style={{ animationDelay: "0.95s" }}>▸ RISK EVOLUTION + ARC TRACKER</p>
+              <p style={{ animationDelay: "1s" }}>▸ MONTE CARLO CORRIDOR + BLIND SPOT</p>
+              <p className="text-emerald-400" style={{ animationDelay: "1.05s" }}>▸ READINESS ENGINE READY</p>
             </div>
           </div>
         )}
@@ -268,6 +309,8 @@ export default function Home() {
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-red-400/70">CORRIDOR</span> {md?.corridorCount} ground tracks projected</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-cyan-400/70">CAD</span> {approachData.length} close approaches tracked</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-emerald-400/70">DEFLECT</span> Δv engine + keyhole-aware planner online</p>
+                      <p><span className="text-zinc-700">[{utc}]</span> <span className="text-cyan-400/70">TIMELINE</span> risk evolution + arc tracker online</p>
+                      <p><span className="text-zinc-700">[{utc}]</span> <span className="text-purple-400/70">MC-CORRIDOR</span> Cholesky sampler + blind spot mapper online</p>
                     </div>
                   </div>
                 </div>
@@ -333,21 +376,9 @@ export default function Home() {
               <div className="space-y-3">
                 <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "520px" }}>
                   {approachData.length > 0 ? (
-                    <ApproachTimeline
-                      approaches={approachData}
-                      onSelect={(des) => {
-                        const found = data?.threats.find((t) => t.designation === des);
-                        if (found) openDossier(found);
-                      }}
-                    />
+                    <ApproachTimeline approaches={approachData} onSelect={(des) => { const found = data?.threats.find((t) => t.designation === des); if (found) openDossier(found); }} />
                   ) : (
-                    <div className="w-full h-full flex items-center justify-center">
-                      <div className="text-center">
-                        <Radar size={24} className="text-zinc-700 mx-auto mb-2 animate-pulse" />
-                        <p className="font-mono text-[10px] text-zinc-600">LOADING CLOSE APPROACH DATA FROM NASA CAD...</p>
-                        <p className="font-mono text-[8px] text-zinc-700 mt-1">ssd-api.jpl.nasa.gov/cad.api</p>
-                      </div>
-                    </div>
+                    <div className="w-full h-full flex items-center justify-center"><div className="text-center"><Radar size={24} className="text-zinc-700 mx-auto mb-2 animate-pulse" /><p className="font-mono text-[10px] text-zinc-600">LOADING CLOSE APPROACH DATA FROM NASA CAD...</p><p className="font-mono text-[8px] text-zinc-700 mt-1">ssd-api.jpl.nasa.gov/cad.api</p></div></div>
                   )}
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -434,10 +465,77 @@ export default function Home() {
               </div>
             )}
 
-            {/* DEFLECTION — Phase 3.2 */}
+            {/* DEFLECTION */}
             {tab === "deflect" && (
               <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "640px" }}>
                 <DeflectionPlanner threats={data.threats} selected={selected} />
+              </div>
+            )}
+
+            {/* TIMELINE */}
+            {tab === "timeline" && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <select value={timelineTarget} onChange={(e) => { setTimelineTarget(e.target.value); fetchTimeline(e.target.value); }} className="bg-zinc-900/80 border border-zinc-700/50 rounded px-2.5 py-1.5 text-[10px] font-mono text-zinc-200 focus:outline-none focus:border-cyan-500/40 w-64">
+                    <option value="">— SELECT OBJECT FOR TIMELINE —</option>
+                    {data.threats.slice(0, 50).map((t) => (
+                      <option key={t.designation} value={t.designation}>{t.designation} (IP: {t.nasa.ip > 0 ? t.nasa.ip.toExponential(1) : "—"})</option>
+                    ))}
+                  </select>
+                  {timelineLoading && <span className="text-[9px] font-mono text-cyan-400 animate-pulse">COMPUTING EVOLUTION...</span>}
+                </div>
+                {timelineData ? (
+                  <>
+                    <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "440px" }}>
+                      <RiskTimeline timeline={timelineData.riskEvolution.timeline} trend={timelineData.riskEvolution.trend} arc={timelineData.observationArc.arc} designation={timelineTarget} currentIP={timelineData.current.ip} lossDateYearsFromNow={timelineData.observationArc.lossDateYearsFromNow} yarkovskyDominanceYears={timelineData.observationArc.yarkovskyDominanceYears} recommendation={timelineData.riskEvolution.recommendation} nasaEsaDivergenceTrend={timelineData.riskEvolution.nasaEsaDivergenceTrend} />
+                    </div>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      <MiniKpi label="ARC LENGTH" value={`${timelineData.observationArc.arc.arcLengthDays.toFixed(0)} d`} color="text-cyan-400" />
+                      <MiniKpi label="ARC QUALITY" value={timelineData.observationArc.arc.arcQuality} color={timelineData.observationArc.arc.arcQuality === "EXCELLENT" || timelineData.observationArc.arc.arcQuality === "GOOD" ? "text-emerald-400" : timelineData.observationArc.arc.arcQuality === "MODERATE" ? "text-amber-400" : "text-red-400"} />
+                      <MiniKpi label="LOSS IN" value={isFinite(timelineData.observationArc.lossDateYearsFromNow) ? `${timelineData.observationArc.lossDateYearsFromNow.toFixed(1)} yr` : "—"} color={timelineData.observationArc.lossDateYearsFromNow < 5 ? "text-red-400" : "text-emerald-400"} />
+                      <MiniKpi label="TREND" value={timelineData.riskEvolution.trend.direction} color={timelineData.riskEvolution.trend.direction === "RISING" ? "text-red-400" : timelineData.riskEvolution.trend.direction === "FALLING" ? "text-emerald-400" : "text-amber-400"} />
+                    </div>
+                    <div className="rounded-lg border border-zinc-800/50 bg-[#080810]/50 p-3">
+                      <p className="text-[8px] font-mono text-zinc-500 uppercase tracking-[0.2em] mb-1.5">ENGINE RECOMMENDATION</p>
+                      <p className="text-[9px] font-mono text-zinc-300 leading-relaxed">{timelineData.riskEvolution.recommendation}</p>
+                      <p className="text-[8px] font-mono text-zinc-600 mt-2">{timelineData.observationArc.recommendation}</p>
+                    </div>
+                  </>
+                ) : (
+                  <div className="rounded-lg border border-zinc-800/50 bg-[#080810]/50 p-8 text-center">
+                    <Clock size={24} className="text-zinc-700 mx-auto mb-2" />
+                    <p className="font-mono text-[10px] text-zinc-600">Select an object to compute its risk evolution timeline</p>
+                    <p className="font-mono text-[8px] text-zinc-700 mt-1">Models IP(t) from uncertainty growth + Yarkovsky drift + geometric convergence</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* BLIND SPOT — Phase 3.4 */}
+            {tab === "blindspot" && (
+              <div className="space-y-3">
+                <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "520px" }}>
+                  <BlindSpotMap />
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <MiniKpi label="140m+ UNDISCOVERED" value="~15,000" color="text-red-400" />
+                  <MiniKpi label="SOLAR BLIND ZONE" value="±45° elongation" color="text-amber-400" />
+                  <MiniKpi label="NEO SURVEYOR" value="2027-2028" color="text-cyan-400" />
+                  <MiniKpi label="RUBIN FIRST LIGHT" value="2026" color="text-emerald-400" />
+                </div>
+                <div className="rounded-lg border border-zinc-800/50 bg-[#080810]/50 p-3">
+                  <p className="text-[8px] font-mono text-zinc-500 uppercase tracking-[0.2em] mb-1.5">BLIND SPOT ANALYSIS</p>
+                  <p className="text-[9px] font-mono text-zinc-300 leading-relaxed">
+                    Only 43% of 140m+ near-Earth asteroids have been discovered. The remaining ~15,000 objects
+                    are concentrated in the solar elongation blind zone (within ±45° of the Sun) where ground-based
+                    surveys cannot observe. The southern ecliptic hemisphere is under-covered until Rubin/LSST
+                    achieves full operations. A city-killer approaching from the sunward direction would provide
+                    less than 24 hours warning. NEO Surveyor (IR space telescope, 2027-2028) will address this gap.
+                  </p>
+                  <p className="text-[7px] font-mono text-zinc-700 mt-2">
+                    Reference: NASA OIG IG-25-006 • Mainzer et al. (2019) • Chesley et al. (2024)
+                  </p>
+                </div>
               </div>
             )}
 
@@ -475,8 +573,8 @@ export default function Home() {
       {/* FOOTER */}
       <footer className="border-t border-zinc-800/30 px-5 py-2 mt-2">
         <div className="max-w-[1920px] mx-auto flex flex-wrap justify-between gap-2 text-[7px] font-mono text-zinc-800">
-          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026 • DEFLECTION: CARUSI 2002 / DART β=3.61</span>
-          <span>ENGINE v3.2 • NOT FOR OPERATIONAL USE</span>
+          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026 • DEFLECTION: CARUSI 2002 / DART β=3.61 • ARC: BOWELL 2002 • RISK EVOLUTION: CHESLEY 2005 • MC-CORRIDOR: MUINONEN 2001 • CHOLESKY: PRESS 2007 • BLIND SPOT: NASA OIG IG-25-006</span>
+          <span>ENGINE v3.4 • NOT FOR OPERATIONAL USE</span>
         </div>
       </footer>
 
