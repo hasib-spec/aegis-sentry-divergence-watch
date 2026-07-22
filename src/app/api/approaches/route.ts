@@ -1,37 +1,42 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseCADResponse, summarizeApproaches } from "@/lib/engine/close-approach";
-import { computeMOID, quickMOIDEstimate } from "@/lib/engine/moid";
+import { quickMOIDEstimate } from "@/lib/engine/moid";
 import { computeAtmosphericEntry } from "@/lib/engine/atmospheric-entry";
 import {
-  parseNasaSentryResponse,
   parseEsaKeplerianCatalogue,
   esaRecordToKeplerian,
   normalizeDesignation,
 } from "@/lib/engine/parsers";
 import { KeplerianElements } from "@/lib/engine/types";
-import { AU_KM } from "@/lib/engine/constants";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const CAD_URL = "https://ssd-api.jpl.nasa.gov/cad.api";
-const NASA_SENTRY_URL = "https://ssd-api.jpl.nasa.gov/sentry.api";
-const ESA_KEPLERIAN_CAT_URL = "https://neo.ssa.esa.int/PSDB-portlet/download?file=neo_kc.cat";
+const ESA_KEPLERIAN_CAT_URL =
+  "https://neo.ssa.esa.int/PSDB-portlet/download?file=neo_kc.cat";
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const des = searchParams.get("des");
 
-  // If specific object requested, get its close approaches
+  // ─── SINGLE OBJECT MODE ───
   if (des) {
     try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 8000);
+
       const cadRes = await fetch(
-        `${CAD_URL}?des=${encodeURIComponent(des)}&dist-max=0.5&v-inf-min=0&v-inf-max=100&sort=cd&body=E`,
-        { headers: { Accept: "application/json" } }
+        `${CAD_URL}?des=${encodeURIComponent(des)}&dist-max=0.5&sort=cd`,
+        { signal: controller.signal, headers: { Accept: "application/json" } }
       );
+      clearTimeout(timeout);
 
       if (!cadRes.ok) {
-        return NextResponse.json({ error: "CAD API error", designation: des }, { status: 502 });
+        return NextResponse.json(
+          { error: "CAD API error", designation: des },
+          { status: 502 }
+        );
       }
 
       const cadJson = await cadRes.json();
@@ -65,12 +70,18 @@ export async function GET(request: NextRequest) {
               epochJD: parseFloat(sbdb.orbit.epoch) || 2451545,
             };
 
-            moid = computeMOID(elements);
+            moid = quickMOIDEstimate(elements);
 
-            // Entry physics
-            const diameter = sbdb.phys_par?.find((p: { name: string }) => p.name === "diameter");
-            const diameterKm = diameter ? parseFloat(diameter.value) / 1000 : 0.05;
-            const vInf = summary.nextApproachVelocityKmS > 0 ? summary.nextApproachVelocityKmS : 15;
+            const diameter = sbdb.phys_par?.find(
+              (p: { name: string }) => p.name === "diameter"
+            );
+            const diameterKm = diameter
+              ? parseFloat(diameter.value) / 1000
+              : 0.05;
+            const vInf =
+              summary.nextApproachVelocityKmS > 0
+                ? summary.nextApproachVelocityKmS
+                : 15;
             entry = computeAtmosphericEntry(diameterKm, vInf, 45);
           }
         }
@@ -87,69 +98,104 @@ export async function GET(request: NextRequest) {
       });
     } catch (err) {
       return NextResponse.json(
-        { error: err instanceof Error ? err.message : "Failed", designation: des },
+        {
+          error: err instanceof Error ? err.message : "Failed",
+          designation: des,
+        },
         { status: 500 }
       );
     }
   }
 
-  // Batch mode: get top threats' close approaches
+  // ─── BATCH MODE: Single CAD call for ALL close approaches ───
   try {
-    const [sentryRes, esaCatRes] = await Promise.allSettled([
-      fetch(`${NASA_SENTRY_URL}?ps-min=-4`, { headers: { Accept: "application/json" } }),
-      fetch(ESA_KEPLERIAN_CAT_URL, { headers: { Accept: "text/plain" } }),
-    ]);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
 
-    let topDesignations: string[] = [];
-    if (sentryRes.status === "fulfilled" && sentryRes.value.ok) {
-      const records = parseNasaSentryResponse(await sentryRes.value.json());
-      topDesignations = records.slice(0, 15).map((r) => r.des);
+    // ONE call: get all Earth close approaches within 0.05 AU (~19 LD)
+    // for the next 100 years, sorted by distance (closest first)
+    const now = new Date();
+    const dateMin = now.toISOString().slice(0, 10);
+    const futureDate = new Date(now.getTime() + 100 * 365.25 * 86400000);
+    const dateMax = futureDate.toISOString().slice(0, 10);
+
+    const cadRes = await fetch(
+      `${CAD_URL}?dist-max=0.05&date-min=${dateMin}&date-max=${dateMax}&sort=dist&limit=50`,
+      {
+        signal: controller.signal,
+        headers: {
+          Accept: "application/json",
+          "User-Agent": "AegisSentry/3.1 (Research)",
+        },
+      }
+    );
+    clearTimeout(timeout);
+
+    if (!cadRes.ok) {
+      return NextResponse.json(
+        { error: `CAD API returned ${cadRes.status}`, approaches: [], count: 0 },
+        { status: 200 }
+      );
     }
 
+    const cadJson = await cadRes.json();
+    const allRecords = parseCADResponse(cadJson);
+
+    // Group by designation and summarize
+    const byDesignation = new Map<
+      string,
+      ReturnType<typeof parseCADResponse>
+    >();
+    for (const rec of allRecords) {
+      const key = rec.designation;
+      if (!byDesignation.has(key)) byDesignation.set(key, []);
+      byDesignation.get(key)!.push(rec);
+    }
+
+    // Try to get MOID from ESA catalogue (non-blocking, best-effort)
     const esaCat = new Map<string, KeplerianElements>();
-    if (esaCatRes.status === "fulfilled" && esaCatRes.value.ok) {
-      try {
-        const rawCat = parseEsaKeplerianCatalogue(await esaCatRes.value.text());
+    try {
+      const catController = new AbortController();
+      const catTimeout = setTimeout(() => catController.abort(), 5000);
+      const esaCatRes = await fetch(ESA_KEPLERIAN_CAT_URL, {
+        signal: catController.signal,
+        headers: { Accept: "text/plain" },
+      });
+      clearTimeout(catTimeout);
+      if (esaCatRes.ok) {
+        const rawCat = parseEsaKeplerianCatalogue(await esaCatRes.text());
         for (const [key, record] of rawCat) {
           esaCat.set(key, esaRecordToKeplerian(record));
         }
-      } catch { /* */ }
+      }
+    } catch {
+      /* ESA catalogue optional */
     }
 
-    // Fetch close approaches for top objects (parallel, limited)
-    const approachResults = await Promise.allSettled(
-      topDesignations.slice(0, 10).map(async (des) => {
-        const res = await fetch(
-          `${CAD_URL}?des=${encodeURIComponent(des)}&dist-max=0.2&sort=cd&body=E`,
-          { headers: { Accept: "application/json" } }
-        );
-        if (!res.ok) return null;
-        const json = await res.json();
-        const records = parseCADResponse(json);
-        const summary = summarizeApproaches(des, records);
-
-        // Quick MOID from catalogue
-        const elements = esaCat.get(normalizeDesignation(des));
+    // Build response: one entry per unique object
+    const approaches = Array.from(byDesignation.entries())
+      .map(([designation, records]) => {
+        const summary = summarizeApproaches(designation, records);
+        const elements = esaCat.get(normalizeDesignation(designation));
         const moidAU = elements ? quickMOIDEstimate(elements) : null;
-
-        // FIX: summary already contains `designation`, so don't duplicate it
         return { ...summary, moidAU };
       })
-    );
-
-    const approaches = approachResults
-      .filter((r) => r.status === "fulfilled" && r.value !== null)
-      .map((r) => (r as PromiseFulfilledResult<unknown>).value);
+      .sort((a, b) => a.nextApproachLD - b.nextApproachLD)
+      .slice(0, 30);
 
     return NextResponse.json({
       approaches,
       count: approaches.length,
+      totalRecords: allRecords.length,
       timestamp: new Date().toISOString(),
     });
   } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Failed" },
-      { status: 500 }
-    );
+    // Return empty but valid response so frontend doesn't break
+    return NextResponse.json({
+      error: err instanceof Error ? err.message : "CAD fetch failed",
+      approaches: [],
+      count: 0,
+      timestamp: new Date().toISOString(),
+    });
   }
 }
