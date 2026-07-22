@@ -132,7 +132,8 @@ export async function GET(request: NextRequest) {
         const elements = esaCat.get(normalizeDesignation(des));
         const moidAU = elements ? quickMOIDEstimate(elements) : null;
 
-        return { designation: des, ...summary, moidAU };
+        // FIX: summary already contains `designation`, so don't duplicate it
+        return { ...summary, moidAU };
       })
     );
 
