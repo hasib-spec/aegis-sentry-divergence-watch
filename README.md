@@ -4,8 +4,8 @@
 > quantified live. Yarkovsky sensitivity. Keyhole alerts. Impact corridors.
 > Deflection planning. Rubin LSST triage.
 
-**Live:** https://aegis-sentry.vercel.app
-**API Docs:** https://aegis-sentry.vercel.app/api/docs
+**Live:** https://aegis-sentry-divergence-watch-alpha.vercel.app/
+
 
 ## Why This Exists
 
