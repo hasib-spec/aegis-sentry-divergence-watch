@@ -20,7 +20,11 @@ export default function OrbitsViewer({
     async function initCesium() {
       try {
         if (typeof window === "undefined") return;
-        (window as Record<string, unknown>).CESIUM_BASE_URL = "/cesium/";
+
+        // Fix: cast through unknown first to satisfy TypeScript strict mode
+        (window as unknown as Record<string, unknown>).CESIUM_BASE_URL =
+          "/cesium/";
+
         const Cesium = await import("cesium");
         if (!mounted || !containerRef.current) return;
 
