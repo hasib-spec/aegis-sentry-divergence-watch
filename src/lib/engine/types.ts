@@ -1,6 +1,6 @@
 /**
- * AEGIS-SENTRY DIVERGENCE WATCH v2.0
- * Type Definitions
+ * AEGIS-SENTRY DIVERGENCE WATCH v3.0
+ * Type Definitions — Planetary Defense Readiness Engine
  */
 
 export interface Vector3D {
@@ -130,8 +130,70 @@ export interface DivergenceMetrics {
   propagationEpochJD: number;
 }
 
+/* ═══════════ v3.0 ADVANCED METRICS ═══════════ */
+
+export interface YsiMetrics {
+  ysi: number;
+  daDtAUMyr: number;
+  alongTrackShiftKm: number;
+  uncertaintyFraction: number;
+  dominanceYears: number;
+  classification: "NEGLIGIBLE" | "LOW" | "MODERATE" | "HIGH" | "DOMINANT";
+  bPlaneSigmaKm: number;
+}
+
+export interface KeyholeInfo {
+  resonance: string;
+  xiKm: number;
+  widthKm: number;
+  earthOrbits: number;
+  asteroidOrbits: number;
+}
+
+export interface KeyholeMetrics {
+  keyholeCount: number;
+  nearestResonance: string;
+  nearestXiKm: number;
+  nearestWidthKm: number;
+  sigmaFromKeyhole: number;
+  passageProbability: number;
+  isAlert: boolean;
+  susceptibility: "LOW" | "ELEVATED" | "HIGH";
+  keyholes: KeyholeInfo[];
+  missDistanceKm: number;
+  sigmaXiKm: number;
+  sigmaZetaKm: number;
+  vInfKmS: number;
+}
+
+export interface CorridorMetrics {
+  hasCorridor: boolean;
+  centerLatDeg: number;
+  centerLonDeg: number;
+  widthKm: number;
+  lengthKm: number;
+  orientationDeg: number;
+  entryVelocityKmS: number;
+  entryAngleDeg: number;
+}
+
+export interface ReadinessMetrics {
+  score: number;
+  priority: "ROUTINE" | "ELEVATED" | "URGENT" | "CRITICAL";
+  nextWindowYears: number;
+  factors: string[];
+}
+
+export interface AdvancedThreat extends DivergenceMetrics {
+  ysi: YsiMetrics;
+  keyhole: KeyholeMetrics;
+  corridor: CorridorMetrics;
+  readiness: ReadinessMetrics;
+  elementsEstimated: boolean;
+}
+
 export interface ThreatsApiResponse {
-  threats: DivergenceMetrics[];
+  threats: AdvancedThreat[];
   metadata: {
     nasaCount: number;
     esaCount: number;
@@ -142,6 +204,11 @@ export interface ThreatsApiResponse {
     maxPalermoDelta: number;
     maxProbabilityRatio: number;
     criticalCount: number;
+    ysiDominantCount: number;
+    keyholeAlertCount: number;
+    corridorCount: number;
+    readinessCriticalCount: number;
+    topReadinessScore: number;
     fetchTimestamp: string;
     nasaApiStatus: "OK" | "ERROR" | "RATE_LIMITED";
     esaApiStatus: "OK" | "ERROR" | "RATE_LIMITED";
@@ -151,11 +218,54 @@ export interface ThreatsApiResponse {
   };
 }
 
-/**
- * Props for the OrbitsViewer CesiumJS component.
- * Defined here (not in the component file) to avoid Next.js 14
- * page type validation conflicts.
- */
+export interface DossierResponse {
+  designation: string;
+  normalizedDesignation: string;
+  engineVersion: string;
+  timestamp: string;
+  nasa: {
+    sentry: { summary?: Record<string, string>; data?: Array<Record<string, string>> } | null;
+    orbitalElements: KeplerianWithCovariance | null;
+    nonGravParams?: { A1?: number; A2?: number; A3?: number };
+    hasYarkovskyModeling: boolean;
+  };
+  esa: {
+    orbitalElements: KeplerianElements | null;
+    riskFileRaw: string | null;
+    hasNonGravModeling: boolean;
+  };
+  propagation: Array<{
+    targetJD: number;
+    yearsFromNow: number;
+    nasaPosition: Vector3D | null;
+    esaPosition: Vector3D | null;
+    spatialDivergenceKm: number;
+    yarkovskyPositionShiftKm: number;
+    daDtAUDay: number;
+  }>;
+  palermo: {
+    palermoScale: number;
+    backgroundFreq: number;
+    energyMt: number;
+    vImpKmS: number;
+    torinoScale: number;
+  } | null;
+  divergence: {
+    spatialDivergence1yr: number;
+    spatialDivergence10yr: number;
+    spatialDivergence50yr: number;
+    yarkovskyShift50yr: number;
+    daDtAUDay: number;
+  };
+  advanced: {
+    ysi: YsiMetrics;
+    keyhole: KeyholeMetrics;
+    corridor: CorridorMetrics;
+    readiness: ReadinessMetrics;
+    elementsEstimated: boolean;
+  };
+}
+
 export interface OrbitsViewerProps {
   threats: DivergenceMetrics[];
   selected: DivergenceMetrics | null;
