@@ -24,6 +24,15 @@ const MAX_ANOMALIES = 500;
 
 let dbInstance: IDBDatabase | null = null;
 
+/** Helper: wait for an IDBTransaction to complete (native API has no .done) */
+function txDone(tx: IDBTransaction): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+}
+
 function openDB(): Promise<IDBDatabase> {
   if (dbInstance) return Promise.resolve(dbInstance);
 
@@ -98,7 +107,7 @@ export async function storeSnapshot(
       }
     };
 
-    await tx.done;
+    await txDone(tx);
   } catch {
     // Silent fail — non-critical
   }
@@ -157,7 +166,7 @@ export async function storeAnomaly(anomaly: AnomalyEvent): Promise<void> {
       }
     };
 
-    await tx.done;
+    await txDone(tx);
   } catch {
     // Silent fail
   }
