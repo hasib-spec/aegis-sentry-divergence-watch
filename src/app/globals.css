@@ -1,0 +1,95 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&family=Inter:wght@300;400;500;600;700;800;900&display=swap");
+
+:root {
+  --nasa-cyan: #00e5ff;
+  --esa-orange: #ff6d00;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  background: #030308;
+  color: #e4e4e7;
+  font-family: "Inter", system-ui, sans-serif;
+  overflow-x: hidden;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #0a0a12;
+}
+::-webkit-scrollbar-thumb {
+  background: #1a1a2e;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #2a2a4e;
+}
+
+@layer components {
+  .panel-glass {
+    @apply bg-panel/80 backdrop-blur-xl border border-panel-border rounded-lg;
+  }
+  .data-readout {
+    @apply font-mono text-xs tracking-tight;
+  }
+  .nasa-accent {
+    @apply text-nasa;
+    text-shadow: 0 0 8px var(--nasa-cyan);
+  }
+  .esa-accent {
+    @apply text-esa;
+    text-shadow: 0 0 8px var(--esa-orange);
+  }
+  .divergence-bar {
+    @apply h-1.5 rounded-full transition-all duration-700 ease-out;
+  }
+  .grid-overlay {
+    background-image: linear-gradient(
+        rgba(0, 229, 255, 0.03) 1px,
+        transparent 1px
+      ),
+      linear-gradient(90deg, rgba(0, 229, 255, 0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+}
+
+.cesium-viewer .cesium-viewer-toolbar {
+  display: none;
+}
+.cesium-viewer .cesium-viewer-animationContainer {
+  display: none;
+}
+.cesium-viewer .cesium-viewer-timelineContainer {
+  display: none;
+}
+.cesium-viewer .cesium-viewer-fullscreenContainer {
+  display: none;
+}
+.cesium-viewer .cesium-viewer-vrContainer {
+  display: none;
+}
+.cesium-viewer .cesium-credit-logoContainer {
+  display: none;
+}
+.cesium-viewer .cesium-viewer-geocoderContainer {
+  display: none;
+}
+.cesium-viewer .cesium-viewer-navigationContainer {
+  display: none;
+}
+.cesium-viewer .cesium-viewer-bottom {
+  display: none;
+}
