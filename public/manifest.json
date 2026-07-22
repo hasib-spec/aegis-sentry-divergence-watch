@@ -1,0 +1,85 @@
+{
+  "name": "AEGIS·SENTRY — Planetary Defense Readiness Engine",
+  "short_name": "AEGIS·SENTRY",
+  "description": "Real-time NASA Sentry-II vs ESA NEOCC asteroid risk divergence engine. Yarkovsky sensitivity, keyhole detection, impact corridors, Rubin LSST triage.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#030308",
+  "theme_color": "#00e5ff",
+  "orientation": "any",
+  "scope": "/",
+  "lang": "en",
+  "categories": ["science", "education", "utilities"],
+  "icons": [
+    {
+      "src": "/icons/icon-72.png",
+      "sizes": "72x72",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-128.png",
+      "sizes": "128x128",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-144.png",
+      "sizes": "144x144",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-152.png",
+      "sizes": "152x152",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-384.png",
+      "sizes": "384x384",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Threat Matrix",
+      "short_name": "Matrix",
+      "url": "/?tab=matrix",
+      "description": "View the full multi-agency divergence matrix"
+    },
+    {
+      "name": "Live Feed",
+      "short_name": "Live",
+      "url": "/?tab=live",
+      "description": "Real-time observatory and alert feed"
+    },
+    {
+      "name": "Risk Matrix",
+      "short_name": "Risk",
+      "url": "/?tab=risk",
+      "description": "Palermo Scale risk matrix"
+    }
+  ],
+  "screenshots": [],
+  "prefer_related_applications": false
+}
