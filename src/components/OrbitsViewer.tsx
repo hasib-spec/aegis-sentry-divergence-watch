@@ -21,7 +21,6 @@ export default function OrbitsViewer({
       try {
         if (typeof window === "undefined") return;
 
-        // Fix: cast through unknown first to satisfy TypeScript strict mode
         (window as unknown as Record<string, unknown>).CESIUM_BASE_URL =
           "/cesium/";
 
@@ -33,6 +32,8 @@ export default function OrbitsViewer({
           viewerRef.current = null;
         }
 
+        // CesiumJS 1.104+ removed imageryProvider from constructor.
+        // Use baseLayer: false for a clean dark globe (mission control aesthetic).
         const viewer = new Cesium.Viewer(containerRef.current, {
           animation: false,
           timeline: false,
@@ -46,21 +47,30 @@ export default function OrbitsViewer({
           infoBox: false,
           selectionIndicator: false,
           creditContainer: document.createElement("div"),
-          imageryProvider: new Cesium.TileMapServiceImageryProvider({
-            url: Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII"),
-          }),
-          baseLayer: undefined,
-          terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+          baseLayer: false,
         });
 
+        // Set dark globe appearance
         viewer.scene.globe.baseColor =
-          Cesium.Color.fromCssColorString("#030308");
+          Cesium.Color.fromCssColorString("#0a1628");
         viewer.scene.backgroundColor =
           Cesium.Color.fromCssColorString("#030308");
         viewer.scene.globe.showGroundAtmosphere = false;
         viewer.scene.skyAtmosphere.show = false;
         viewer.scene.sun.show = false;
         viewer.scene.moon.show = false;
+
+        // Add a subtle NaturalEarthII texture if available (non-blocking)
+        try {
+          const provider = await Cesium.TileMapServiceImageryProvider.fromUrl(
+            Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+          );
+          viewer.imageryLayers.add(
+            new Cesium.ImageryLayer(provider, { alpha: 0.4 })
+          );
+        } catch {
+          // If texture fails to load, globe stays dark — acceptable
+        }
 
         viewer.camera.setView({
           destination: Cesium.Cartesian3.fromDegrees(0, 20, 3.5e8),
@@ -211,6 +221,7 @@ export default function OrbitsViewer({
           }
         }
 
+        // Sun at origin
         const sun = viewer.entities.add({
           position: Cesium.Cartesian3.ZERO,
           point: {
