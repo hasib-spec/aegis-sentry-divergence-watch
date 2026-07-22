@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Shield, AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
   Wifi, WifiOff, Filter, Search, LayoutDashboard, Table2,
-  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair,
+  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair, Rocket,
 } from "lucide-react";
 import OrbitsViewer from "@/components/OrbitsViewer";
 import CorridorMap from "@/components/CorridorMap";
@@ -13,9 +13,10 @@ import YarkovskyScatter from "@/components/YarkovskyScatter";
 import ObjectDossier from "@/components/ObjectDossier";
 import ApproachTimeline from "@/components/ApproachTimeline";
 import RiskMatrix from "@/components/RiskMatrix";
+import DeflectionPlanner from "@/components/DeflectionPlanner";
 import type { AdvancedThreat, ThreatsApiResponse } from "@/lib/engine/types";
 
-type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk";
+type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk" | "deflect";
 
 interface ApproachData {
   designation: string;
@@ -81,7 +82,6 @@ export default function Home() {
     return () => clearInterval(iv);
   }, [fetchThreats]);
 
-  // Fetch close approach data (non-blocking, separate from main threats)
   useEffect(() => {
     (async () => {
       try {
@@ -91,7 +91,7 @@ export default function Home() {
           if (json.approaches) setApproachData(json.approaches);
         }
       } catch {
-        /* non-critical — approaches tab will show empty state */
+        /* non-critical */
       }
     })();
   }, []);
@@ -144,6 +144,7 @@ export default function Home() {
     { id: "keyholes", label: "KEYHOLES", icon: <KeyRound size={11} /> },
     { id: "yarkovsky", label: "YARKOVSKY", icon: <Zap size={11} /> },
     { id: "risk", label: "RISK MATRIX", icon: <Crosshair size={11} /> },
+    { id: "deflect", label: "DEFLECTION", icon: <Rocket size={11} /> },
     { id: "rubin", label: "RUBIN FEED", icon: <Activity size={11} /> },
   ];
 
@@ -161,7 +162,7 @@ export default function Home() {
               <h1 className="text-base sm:text-lg font-black tracking-tight text-white leading-none truncate">
                 AEGIS<span className="text-cyan-400">·</span>SENTRY
                 <span className="ml-2 text-[10px] sm:text-xs font-normal text-zinc-500 tracking-wide">READINESS ENGINE</span>
-                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.1</span>
+                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.2</span>
               </h1>
               <p className="text-[8px] sm:text-[9px] font-mono text-zinc-600 tracking-[0.15em] uppercase mt-0.5 truncate">
                 NASA Sentry-II ↔ ESA NEOCC/Aegis ↔ Rubin LSST Triage
@@ -210,6 +211,7 @@ export default function Home() {
               <p style={{ animationDelay: "0.6s" }}>▸ KEYHOLE RESONANCE SCAN</p>
               <p style={{ animationDelay: "0.75s" }}>▸ CORRIDOR GROUND-TRACK SWEEP</p>
               <p style={{ animationDelay: "0.85s" }}>▸ CLOSE APPROACH RADAR (CAD)</p>
+              <p style={{ animationDelay: "0.9s" }}>▸ DEFLECTION Δv ENGINE</p>
               <p className="text-emerald-400" style={{ animationDelay: "0.95s" }}>▸ READINESS ENGINE READY</p>
             </div>
           </div>
@@ -265,6 +267,7 @@ export default function Home() {
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-purple-400/70">KEYHOLE</span> {md?.keyholeAlertCount} resonance alerts</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-red-400/70">CORRIDOR</span> {md?.corridorCount} ground tracks projected</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-cyan-400/70">CAD</span> {approachData.length} close approaches tracked</p>
+                      <p><span className="text-zinc-700">[{utc}]</span> <span className="text-emerald-400/70">DEFLECT</span> Δv engine + keyhole-aware planner online</p>
                     </div>
                   </div>
                 </div>
@@ -325,7 +328,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* APPROACHES — NEW TAB */}
+            {/* APPROACHES */}
             {tab === "approaches" && (
               <div className="space-y-3">
                 <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "520px" }}>
@@ -416,7 +419,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* RISK MATRIX — NEW TAB */}
+            {/* RISK MATRIX */}
             {tab === "risk" && (
               <div className="space-y-3">
                 <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "520px" }}>
@@ -428,6 +431,13 @@ export default function Home() {
                   <MiniKpi label="ENERGY > 1 Mt" value={String(data.threats.filter((t) => t.nasa.energyMt > 1).length)} color="text-orange-400" />
                   <MiniKpi label="ENERGY > 1000 Mt" value={String(data.threats.filter((t) => t.nasa.energyMt > 1000).length)} color="text-red-400" />
                 </div>
+              </div>
+            )}
+
+            {/* DEFLECTION — Phase 3.2 */}
+            {tab === "deflect" && (
+              <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "640px" }}>
+                <DeflectionPlanner threats={data.threats} selected={selected} />
               </div>
             )}
 
@@ -465,8 +475,8 @@ export default function Home() {
       {/* FOOTER */}
       <footer className="border-t border-zinc-800/30 px-5 py-2 mt-2">
         <div className="max-w-[1920px] mx-auto flex flex-wrap justify-between gap-2 text-[7px] font-mono text-zinc-800">
-          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026</span>
-          <span>ENGINE v3.1 • NOT FOR OPERATIONAL USE</span>
+          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026 • DEFLECTION: CARUSI 2002 / DART β=3.61</span>
+          <span>ENGINE v3.2 • NOT FOR OPERATIONAL USE</span>
         </div>
       </footer>
 
