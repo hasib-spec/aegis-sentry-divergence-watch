@@ -2,14 +2,19 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "AEGIS-SENTRY | NASA vs ESA Asteroid Risk Divergence",
+  title: "AEGIS·SENTRY — Planetary Defense Readiness Engine",
   description:
-    "Real-time scientific engine comparing NASA Sentry-II and ESA NEOCC/Aegis impact probability calculations. Keplerian propagation. Yarkovsky modeling. Palermo Scale recomputation.",
+    "Real-time NASA Sentry-II vs ESA NEOCC/Aegis divergence engine with Yarkovsky Sensitivity Index, gravitational keyhole detection, impact corridor projection, and Rubin LSST follow-up triage.",
   openGraph: {
-    title: "AEGIS-SENTRY Divergence Watch",
+    title: "AEGIS·SENTRY v3.0 — Planetary Defense Readiness Engine",
     description:
-      "Where NASA and ESA disagree on whether an asteroid will hit Earth.",
+      "Where NASA and ESA disagree on asteroid impact risk — quantified live. Yarkovsky sensitivity. Keyhole alerts. Impact corridors. Rubin triage.",
     type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AEGIS·SENTRY v3.0",
+    description: "NASA vs ESA asteroid risk divergence, quantified in real time.",
   },
 };
 
