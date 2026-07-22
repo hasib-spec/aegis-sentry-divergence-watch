@@ -1,0 +1,199 @@
+import { NextRequest, NextResponse } from "next/server";
+import {
+  checkRateLimit,
+  extractClientIP,
+  rateLimitHeaders,
+  RATE_PRESETS,
+} from "@/lib/engine/rate-limiter";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/**
+ * In-memory annotation store (per serverless instance).
+ * Production: replace with Postgres / Supabase / Vercel KV.
+ */
+interface StoredAnnotation {
+  id: string;
+  targetDesignation: string;
+  type: string;
+  priority: string;
+  author: string;
+  authorRole: string;
+  body: string;
+  metadata?: Record<string, string | number>;
+  createdAt: string;
+  updatedAt: string;
+  resolved: boolean;
+  parentId?: string;
+  tags: string[];
+}
+
+const annotationStore = new Map<string, StoredAnnotation>();
+
+function generateId(): string {
+  return `ann-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/* ── GET: List annotations ── */
+export async function GET(request: NextRequest) {
+  const clientIP = extractClientIP(request.headers);
+  const rl = checkRateLimit(`ann:${clientIP}`, RATE_PRESETS.collab);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429, headers: rateLimitHeaders(rl) }
+    );
+  }
+
+  const { searchParams } = new URL(request.url);
+  const des = searchParams.get("des");
+
+  let annotations = Array.from(annotationStore.values());
+
+  if (des) {
+    annotations = annotations.filter(
+      (a) => a.targetDesignation.toUpperCase() === des.toUpperCase()
+    );
+  }
+
+  annotations.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return NextResponse.json(
+    {
+      annotations: annotations.slice(0, 200),
+      count: annotations.length,
+      timestamp: new Date().toISOString(),
+    },
+    { headers: rateLimitHeaders(rl) }
+  );
+}
+
+/* ── POST: Create annotation ── */
+export async function POST(request: NextRequest) {
+  const clientIP = extractClientIP(request.headers);
+  const rl = checkRateLimit(`ann:${clientIP}`, RATE_PRESETS.collab);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429, headers: rateLimitHeaders(rl) }
+    );
+  }
+
+  try {
+    const body = await request.json();
+
+    if (!body.targetDesignation || !body.body || !body.author) {
+      return NextResponse.json(
+        { error: "Missing required fields: targetDesignation, body, author" },
+        { status: 400 }
+      );
+    }
+
+    const now = new Date().toISOString();
+    const annotation: StoredAnnotation = {
+      id: generateId(),
+      targetDesignation: String(body.targetDesignation),
+      type: body.type || "COMMENT",
+      priority: body.priority || "INFO",
+      author: String(body.author).slice(0, 100),
+      authorRole: body.authorRole || "ANONYMOUS",
+      body: String(body.body).slice(0, 5000),
+      metadata: body.metadata,
+      createdAt: now,
+      updatedAt: now,
+      resolved: false,
+      parentId: body.parentId,
+      tags: Array.isArray(body.tags) ? body.tags.slice(0, 10) : [],
+    };
+
+    annotationStore.set(annotation.id, annotation);
+
+    return NextResponse.json(annotation, {
+      status: 201,
+      headers: rateLimitHeaders(rl),
+    });
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid JSON body" },
+      { status: 400, headers: rateLimitHeaders(rl) }
+    );
+  }
+}
+
+/* ── PATCH: Update annotation ── */
+export async function PATCH(request: NextRequest) {
+  const clientIP = extractClientIP(request.headers);
+  const rl = checkRateLimit(`ann:${clientIP}`, RATE_PRESETS.collab);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429, headers: rateLimitHeaders(rl) }
+    );
+  }
+
+  try {
+    const body = await request.json();
+    const { id, ...updates } = body;
+
+    if (!id || !annotationStore.has(id)) {
+      return NextResponse.json(
+        { error: "Annotation not found" },
+        { status: 404 }
+      );
+    }
+
+    const existing = annotationStore.get(id)!;
+    const updated: StoredAnnotation = {
+      ...existing,
+      body: updates.body ?? existing.body,
+      priority: updates.priority ?? existing.priority,
+      resolved: updates.resolved ?? existing.resolved,
+      tags: updates.tags ?? existing.tags,
+      metadata: updates.metadata ?? existing.metadata,
+      updatedAt: new Date().toISOString(),
+    };
+
+    annotationStore.set(id, updated);
+
+    return NextResponse.json(updated, { headers: rateLimitHeaders(rl) });
+  } catch {
+    return NextResponse.json(
+      { error: "Invalid JSON body" },
+      { status: 400, headers: rateLimitHeaders(rl) }
+    );
+  }
+}
+
+/* ── DELETE: Remove annotation ── */
+export async function DELETE(request: NextRequest) {
+  const clientIP = extractClientIP(request.headers);
+  const rl = checkRateLimit(`ann:${clientIP}`, RATE_PRESETS.collab);
+  if (!rl.allowed) {
+    return NextResponse.json(
+      { error: "Rate limit exceeded" },
+      { status: 429, headers: rateLimitHeaders(rl) }
+    );
+  }
+
+  const { searchParams } = new URL(request.url);
+  const id = searchParams.get("id");
+
+  if (!id || !annotationStore.has(id)) {
+    return NextResponse.json(
+      { error: "Annotation not found" },
+      { status: 404 }
+    );
+  }
+
+  annotationStore.delete(id);
+  // Also delete replies
+  for (const [key, ann] of annotationStore) {
+    if (ann.parentId === id) annotationStore.delete(key);
+  }
+
+  return NextResponse.json(
+    { deleted: true, id },
+    { headers: rateLimitHeaders(rl) }
+  );
+}
