@@ -32,8 +32,6 @@ export default function OrbitsViewer({
           viewerRef.current = null;
         }
 
-        // CesiumJS 1.104+ removed imageryProvider from constructor.
-        // Use baseLayer: false for a clean dark globe (mission control aesthetic).
         const viewer = new Cesium.Viewer(containerRef.current, {
           animation: false,
           timeline: false,
@@ -50,26 +48,35 @@ export default function OrbitsViewer({
           baseLayer: false,
         });
 
-        // Set dark globe appearance
+        // Dark globe
         viewer.scene.globe.baseColor =
           Cesium.Color.fromCssColorString("#0a1628");
         viewer.scene.backgroundColor =
           Cesium.Color.fromCssColorString("#030308");
         viewer.scene.globe.showGroundAtmosphere = false;
-        viewer.scene.skyAtmosphere.show = false;
-        viewer.scene.sun.show = false;
-        viewer.scene.moon.show = false;
 
-        // Add a subtle NaturalEarthII texture if available (non-blocking)
+        // Null-safe: these can be undefined in CesiumJS 1.122 types
+        if (viewer.scene.skyAtmosphere) {
+          viewer.scene.skyAtmosphere.show = false;
+        }
+        if (viewer.scene.sun) {
+          viewer.scene.sun.show = false;
+        }
+        if (viewer.scene.moon) {
+          viewer.scene.moon.show = false;
+        }
+
+        // Try to add NaturalEarthII texture (non-blocking, graceful fallback)
         try {
-          const provider = await Cesium.TileMapServiceImageryProvider.fromUrl(
-            Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
-          );
+          const provider =
+            await Cesium.TileMapServiceImageryProvider.fromUrl(
+              Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII")
+            );
           viewer.imageryLayers.add(
             new Cesium.ImageryLayer(provider, { alpha: 0.4 })
           );
         } catch {
-          // If texture fails to load, globe stays dark — acceptable
+          // Globe stays dark if texture unavailable — acceptable
         }
 
         viewer.camera.setView({
