@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Shield,
   AlertTriangle,
@@ -11,125 +11,61 @@ import {
   Database,
   Zap,
   Crosshair,
-  Orbit,
   RefreshCw,
   ChevronDown,
   ChevronUp,
   ExternalLink,
   Wifi,
   WifiOff,
+  Filter,
 } from "lucide-react";
-import OrbitsViewer from "@/components/OrbitsViewer";
+import dynamic from "next/dynamic";
 import type { DivergenceMetrics, ThreatsApiResponse } from "@/lib/engine/types";
 
-function formatSciNotation(val: number): string {
+const OrbitsViewer = dynamic(() => import("@/components/OrbitsViewer"), {
+  ssr: false,
+  loading: () => (
+    <div className="w-full h-full flex items-center justify-center bg-[#030308]">
+      <p className="font-mono text-xs text-zinc-600 animate-pulse">
+        INITIALIZING WEBGL...
+      </p>
+    </div>
+  ),
+});
+
+function sci(val: number): string {
   if (val === 0) return "0";
-  if (Math.abs(val) < 1e-4 || Math.abs(val) >= 1e6) {
-    return val.toExponential(3);
-  }
+  if (Math.abs(val) < 1e-4 || Math.abs(val) >= 1e6) return val.toExponential(2);
   return val.toFixed(6);
 }
 
-function DivergenceGauge({ ratio }: { ratio: number }) {
-  const pct = Math.min((Math.abs(Math.log10(ratio || 1)) / 3) * 100, 100);
-  const color =
-    pct > 66 ? "bg-red-500" : pct > 33 ? "bg-amber-500" : "bg-emerald-500";
-  return (
-    <div className="w-full bg-zinc-800 rounded-full h-1.5 overflow-hidden">
-      <div className={`divergence-bar ${color}`} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
-
-function StatusBadge({
-  status,
-  label,
-}: {
-  status: "OK" | "ERROR" | "RATE_LIMITED";
-  label: string;
-}) {
-  const styles = {
-    OK: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
-    ERROR: "bg-red-500/10 text-red-400 border-red-500/30",
-    RATE_LIMITED: "bg-amber-500/10 text-amber-400 border-amber-500/30",
-  };
-  return (
-    <span
-      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono border ${styles[status]}`}
-    >
-      {status === "OK" ? <Wifi size={10} /> : <WifiOff size={10} />}
-      {label}: {status}
-    </span>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  accent: "nasa" | "esa" | "white" | "red";
-}) {
-  const accentStyles = {
-    nasa: "text-nasa border-nasa/20 bg-nasa/5",
-    esa: "text-esa border-esa/20 bg-esa/5",
-    white: "text-zinc-200 border-zinc-700 bg-zinc-800/30",
-    red: "text-red-400 border-red-500/20 bg-red-500/5",
-  };
-  return (
-    <div
-      className={`panel-glass p-2.5 flex flex-col gap-1 border ${accentStyles[accent]}`}
-    >
-      <div className="flex items-center gap-1.5 text-zinc-500">
-        {icon}
-        <span className="text-[9px] font-mono uppercase tracking-wider">
-          {label}
-        </span>
-      </div>
-      <span className="font-mono text-lg font-semibold">{value}</span>
-    </div>
-  );
-}
-
-function DetailRow({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex justify-between items-baseline">
-      <span className="text-[10px] text-zinc-500">{label}</span>
-      <span className="data-readout text-zinc-200">{value}</span>
-    </div>
-  );
+function safeNum(val: unknown): number {
+  if (typeof val === "number" && isFinite(val)) return val;
+  return 0;
 }
 
 export default function Home() {
   const [data, setData] = useState<ThreatsApiResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] =
-    useState<keyof DivergenceMetrics>("palermoDelta");
+  const [sortKey, setSortKey] = useState<string>("palermoDelta");
   const [sortAsc, setSortAsc] = useState(false);
-  const [selectedThreat, setSelectedThreat] =
-    useState<DivergenceMetrics | null>(null);
+  const [selected, setSelected] = useState<DivergenceMetrics | null>(null);
   const [showGlobe, setShowGlobe] = useState(true);
+  const [filter, setFilter] = useState<"ALL" | "BOTH" | "NASA_ONLY" | "ESA_ONLY">("BOTH");
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const fetchThreats = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/threats", {
-        cache: "no-store",
-        headers: { "x-request-ts": Date.now().toString() },
-      });
-      if (!res.ok) throw new Error(`API responded with ${res.status}`);
+      const res = await fetch("/api/threats", { cache: "no-store" });
+      if (!res.ok) throw new Error(`API ${res.status}`);
       const json: ThreatsApiResponse = await res.json();
       setData(json);
       setLastRefresh(new Date());
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Unknown fetch error");
+      setError(err instanceof Error ? err.message : "Fetch failed");
     } finally {
       setLoading(false);
     }
@@ -137,314 +73,247 @@ export default function Home() {
 
   useEffect(() => {
     fetchThreats();
-    const interval = setInterval(fetchThreats, 5 * 60 * 1000);
-    return () => clearInterval(interval);
+    const iv = setInterval(fetchThreats, 5 * 60 * 1000);
+    return () => clearInterval(iv);
   }, [fetchThreats]);
 
-  const sortedThreats = data
-    ? [...data.threats].sort((a, b) => {
-        const aVal = a[sortField] as number;
-        const bVal = b[sortField] as number;
-        if (typeof aVal !== "number" || typeof bVal !== "number") return 0;
-        return sortAsc ? aVal - bVal : bVal - aVal;
-      })
-    : [];
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    let list = data.threats;
+    if (filter !== "ALL") {
+      list = list.filter((t) => t.sourceMatch === filter);
+    }
+    return [...list].sort((a, b) => {
+      let av: number, bv: number;
+      switch (sortKey) {
+        case "designation":
+          return sortAsc
+            ? a.designation.localeCompare(b.designation)
+            : b.designation.localeCompare(a.designation);
+        case "nasaIp":
+          av = safeNum(a.nasa?.ip);
+          bv = safeNum(b.nasa?.ip);
+          break;
+        case "esaIp":
+          av = safeNum(a.esa?.ipCum);
+          bv = safeNum(b.esa?.ipCum);
+          break;
+        case "palermoDelta":
+          av = safeNum(a.palermoDelta);
+          bv = safeNum(b.palermoDelta);
+          break;
+        case "probabilityRatio":
+          av = safeNum(a.probabilityRatio);
+          bv = safeNum(b.probabilityRatio);
+          break;
+        case "spatialDivergenceKm":
+          av = safeNum(a.spatialDivergenceKm);
+          bv = safeNum(b.spatialDivergenceKm);
+          break;
+        default:
+          av = safeNum(a.palermoDelta);
+          bv = safeNum(b.palermoDelta);
+      }
+      return sortAsc ? av - bv : bv - av;
+    });
+  }, [data, filter, sortKey, sortAsc]);
 
-  const handleSort = (field: keyof DivergenceMetrics) => {
-    if (sortField === field) {
-      setSortAsc(!sortAsc);
-    } else {
-      setSortField(field);
+  const handleSort = (key: string) => {
+    if (sortKey === key) setSortAsc(!sortAsc);
+    else {
+      setSortKey(key);
       setSortAsc(false);
     }
   };
 
+  const SortIcon = ({ col }: { col: string }) =>
+    sortKey === col ? (
+      sortAsc ? <ChevronUp size={10} /> : <ChevronDown size={10} />
+    ) : null;
+
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* HEADER */}
-      <header className="border-b border-panel-border bg-panel/60 backdrop-blur-xl sticky top-0 z-50">
-        <div className="max-w-[1920px] mx-auto px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+    <div className="min-h-screen flex flex-col bg-[#030308]">
+      {/* ═══ HEADER ═══ */}
+      <header className="border-b border-zinc-800/60 bg-[#0a0a12]/90 backdrop-blur-2xl sticky top-0 z-50">
+        <div className="max-w-[1920px] mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-4">
             <div className="relative">
-              <Shield className="w-8 h-8 text-nasa" />
-              <div className="absolute -top-1 -right-1 w-3 h-3 bg-esa rounded-full animate-pulse-slow" />
+              <Shield className="w-9 h-9 text-cyan-400" strokeWidth={1.5} />
+              <div className="absolute -top-0.5 -right-0.5 w-3 h-3 bg-orange-500 rounded-full animate-pulse" />
             </div>
             <div>
-              <h1 className="text-lg font-bold tracking-tight text-white">
-                AEGIS-SENTRY{" "}
-                <span className="text-nasa font-light">DIVERGENCE</span>{" "}
-                <span className="text-esa font-light">WATCH</span>
+              <h1 className="text-xl font-black tracking-tight text-white leading-none">
+                AEGIS<span className="text-cyan-400">-</span>SENTRY
+                <span className="ml-2 text-sm font-light text-zinc-500">
+                  DIVERGENCE WATCH
+                </span>
               </h1>
-              <p className="text-[10px] font-mono text-zinc-500 tracking-widest uppercase">
-                Planetary Defense Risk Reconciliation Engine • NASA Sentry-II ↔
-                ESA NEOCC/Aegis
+              <p className="text-[10px] font-mono text-zinc-600 tracking-[0.2em] uppercase mt-0.5">
+                Planetary Defense Risk Reconciliation • NASA Sentry-II ↔ ESA NEOCC/Aegis
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+
+          <div className="flex items-center gap-3">
             {data && (
               <div className="hidden md:flex items-center gap-2">
-                <StatusBadge
-                  status={data.metadata.nasaApiStatus}
-                  label="NASA"
-                />
-                <StatusBadge status={data.metadata.esaApiStatus} label="ESA" />
+                <StatusPill ok={data.metadata.nasaApiStatus === "OK"} label="NASA" />
+                <StatusPill ok={data.metadata.esaApiStatus === "OK"} label="ESA" />
               </div>
             )}
             <button
               onClick={fetchThreats}
               disabled={loading}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-md bg-zinc-800/80 border border-zinc-700 hover:border-nasa/50 hover:bg-zinc-800 transition-all text-xs font-mono disabled:opacity-50"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-800/60 border border-zinc-700/50 hover:border-cyan-500/40 hover:bg-zinc-800 transition-all text-xs font-mono text-zinc-300 disabled:opacity-40"
             >
-              <RefreshCw
-                size={12}
-                className={loading ? "animate-spin" : ""}
-              />
-              {loading ? "SYNCING..." : "REFRESH"}
+              <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+              {loading ? "SYNCING" : "REFRESH"}
             </button>
-            {lastRefresh && (
-              <span className="text-[10px] font-mono text-zinc-600 hidden lg:block">
-                LAST:{" "}
-                {lastRefresh.toLocaleTimeString("en-US", { hour12: false })} UTC
-              </span>
-            )}
           </div>
         </div>
       </header>
 
-      {/* MAIN */}
+      {/* ═══ BODY ═══ */}
       <div className="flex-1 flex flex-col lg:flex-row max-w-[1920px] mx-auto w-full">
-        {/* LEFT: DATA */}
-        <div className="flex-1 flex flex-col min-w-0 p-4 gap-4 overflow-y-auto max-h-[calc(100vh-64px)]">
-          {/* STATS */}
+        {/* LEFT PANEL */}
+        <div className="flex-1 flex flex-col min-w-0 p-4 gap-3 overflow-y-auto max-h-[calc(100vh-60px)]">
+          {/* STAT CARDS */}
           {data && (
-            <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-6 gap-2">
-              <StatCard
-                icon={<Database size={14} />}
-                label="NASA OBJECTS"
-                value={data.metadata.nasaCount.toString()}
-                accent="nasa"
-              />
-              <StatCard
-                icon={<Database size={14} />}
-                label="ESA OBJECTS"
-                value={data.metadata.esaCount.toString()}
-                accent="esa"
-              />
-              <StatCard
-                icon={<Crosshair size={14} />}
-                label="MATCHED"
-                value={data.metadata.matchedCount.toString()}
-                accent="white"
-              />
-              <StatCard
-                icon={<AlertTriangle size={14} />}
-                label="NASA ONLY"
-                value={data.metadata.nasaOnlyCount.toString()}
-                accent="nasa"
-              />
-              <StatCard
-                icon={<AlertTriangle size={14} />}
-                label="ESA ONLY"
-                value={data.metadata.esaOnlyCount.toString()}
-                accent="esa"
-              />
-              <StatCard
-                icon={<TrendingUp size={14} />}
-                label="MAX Δ PS"
-                value={data.metadata.maxPalermoDelta.toFixed(3)}
-                accent="red"
-              />
+            <div className="grid grid-cols-3 md:grid-cols-6 gap-2">
+              <Stat label="NASA" value={data.metadata.nasaCount} color="text-cyan-400" />
+              <Stat label="ESA" value={data.metadata.esaCount} color="text-orange-400" />
+              <Stat label="MATCHED" value={data.metadata.matchedCount} color="text-white" />
+              <Stat label="NASA ONLY" value={data.metadata.nasaOnlyCount} color="text-cyan-400/60" />
+              <Stat label="ESA ONLY" value={data.metadata.esaOnlyCount} color="text-orange-400/60" />
+              <Stat label="CRITICAL" value={data.metadata.criticalCount} color="text-red-400" />
             </div>
           )}
 
           {/* ERROR */}
           {error && (
-            <div className="panel-glass p-4 border-red-500/30">
-              <div className="flex items-center gap-2 text-red-400 text-sm font-mono">
-                <AlertTriangle size={16} />
-                <span>DATA LINK ERROR: {error}</span>
-              </div>
-              <p className="text-xs text-zinc-500 mt-1">
-                Retrying in 5 minutes. Globe displays last known state.
-              </p>
+            <div className="rounded-lg border border-red-500/20 bg-red-500/5 p-3 flex items-center gap-2">
+              <AlertTriangle size={14} className="text-red-400 shrink-0" />
+              <span className="font-mono text-xs text-red-400">{error}</span>
             </div>
           )}
 
           {/* LOADING */}
           {loading && !data && (
             <div className="flex-1 flex items-center justify-center">
-              <div className="font-mono text-xs text-zinc-500 space-y-1 max-w-md">
-                <p className="text-nasa animate-pulse">
-                  ▸ ESTABLISHING UPLINK TO CNEOS SENTRY-II...
-                </p>
-                <p
-                  className="text-esa animate-pulse"
-                  style={{ animationDelay: "0.3s" }}
-                >
-                  ▸ CONNECTING TO ESA NEOCC/AEGIS RISK SERVER...
-                </p>
-                <p
-                  className="text-zinc-600"
-                  style={{ animationDelay: "0.6s" }}
-                >
-                  ▸ PARSING PIPE-DELIMITED ESA TELEMETRY...
-                </p>
-                <p
-                  className="text-zinc-600"
-                  style={{ animationDelay: "0.9s" }}
-                >
-                  ▸ SOLVING KEPLER&apos;S EQUATION (NEWTON-RAPHSON, ε=10⁻¹⁴)...
-                </p>
-                <p
-                  className="text-zinc-600"
-                  style={{ animationDelay: "1.2s" }}
-                >
-                  ▸ COMPUTING YARKOVSKY THERMAL DRIFT da/dt...
-                </p>
-                <p
-                  className="text-zinc-600"
-                  style={{ animationDelay: "1.5s" }}
-                >
-                  ▸ PROPAGATING ORBITS TO EPOCH +30d...
-                </p>
-                <p
-                  className="text-emerald-400"
-                  style={{ animationDelay: "1.8s" }}
-                >
-                  ▸ DIVERGENCE MATRIX READY.
-                </p>
+              <div className="font-mono text-xs space-y-1.5 text-zinc-600">
+                <p className="text-cyan-400 animate-pulse">▸ UPLINK → CNEOS SENTRY-II</p>
+                <p className="text-orange-400 animate-pulse" style={{ animationDelay: "0.2s" }}>▸ UPLINK → ESA NEOCC/AEGIS</p>
+                <p style={{ animationDelay: "0.4s" }}>▸ KEPLER SOLVER ε=10⁻¹⁴</p>
+                <p style={{ animationDelay: "0.6s" }}>▸ YARKOVSKY da/dt COMPUTE</p>
+                <p className="text-emerald-400" style={{ animationDelay: "0.8s" }}>▸ DIVERGENCE MATRIX READY</p>
               </div>
             </div>
           )}
 
-          {/* TABLE */}
+          {/* FILTER BAR */}
           {data && data.threats.length > 0 && (
-            <div className="panel-glass overflow-hidden flex-1 flex flex-col">
-              <div className="px-4 py-2 border-b border-panel-border flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Activity size={14} className="text-nasa" />
-                  <span className="text-xs font-mono text-zinc-400 uppercase tracking-wider">
-                    Divergence Matrix • {data.threats.length} objects
-                  </span>
-                </div>
+            <div className="flex items-center gap-2">
+              <Filter size={12} className="text-zinc-600" />
+              {(["BOTH", "ALL", "NASA_ONLY", "ESA_ONLY"] as const).map((f) => (
                 <button
-                  onClick={() => setShowGlobe(!showGlobe)}
-                  className="lg:hidden flex items-center gap-1 text-xs font-mono text-zinc-500 hover:text-white transition-colors"
+                  key={f}
+                  onClick={() => setFilter(f)}
+                  className={`px-3 py-1 rounded-md text-[10px] font-mono transition-all ${
+                    filter === f
+                      ? f === "BOTH"
+                        ? "bg-cyan-500/15 text-cyan-400 border border-cyan-500/30"
+                        : f === "NASA_ONLY"
+                        ? "bg-cyan-500/10 text-cyan-400/80 border border-cyan-500/20"
+                        : f === "ESA_ONLY"
+                        ? "bg-orange-500/10 text-orange-400/80 border border-orange-500/20"
+                        : "bg-zinc-700/50 text-white border border-zinc-600/50"
+                      : "bg-transparent text-zinc-600 border border-transparent hover:text-zinc-400"
+                  }`}
                 >
-                  <Globe2 size={12} />
-                  {showGlobe ? "HIDE" : "SHOW"} GLOBE
+                  {f}
                 </button>
-              </div>
+              ))}
+              <span className="ml-auto text-[10px] font-mono text-zinc-600">
+                {filtered.length} objects
+              </span>
+            </div>
+          )}
+
+          {/* TABLE */}
+          {data && filtered.length > 0 && (
+            <div className="rounded-lg border border-zinc-800/60 bg-[#0a0a12]/60 backdrop-blur overflow-hidden flex-1 flex flex-col">
               <div className="overflow-auto flex-1">
-                <table className="w-full text-left">
-                  <thead className="sticky top-0 bg-panel z-10">
-                    <tr className="border-b border-panel-border text-[10px] font-mono text-zinc-500 uppercase tracking-wider">
-                      <th
-                        className="px-3 py-2 cursor-pointer hover:text-white transition-colors"
-                        onClick={() => handleSort("designation")}
-                      >
-                        <span className="flex items-center gap-1">
-                          OBJECT
-                          {sortField === "designation" &&
-                            (sortAsc ? (
-                              <ChevronUp size={10} />
-                            ) : (
-                              <ChevronDown size={10} />
-                            ))}
-                        </span>
+                <table className="w-full">
+                  <thead className="sticky top-0 bg-[#0a0a12] z-10">
+                    <tr className="border-b border-zinc-800/60 text-[9px] font-mono text-zinc-500 uppercase tracking-wider">
+                      <th className="px-3 py-2.5 text-left cursor-pointer hover:text-white" onClick={() => handleSort("designation")}>
+                        <span className="flex items-center gap-1">Object <SortIcon col="designation" /></span>
                       </th>
-                      <th className="px-3 py-2">DIA (km)</th>
-                      <th className="px-3 py-2">
-                        <span className="text-nasa/70">NASA IP</span>
+                      <th className="px-3 py-2.5 text-right">Dia km</th>
+                      <th className="px-3 py-2.5 text-right cursor-pointer hover:text-cyan-400" onClick={() => handleSort("nasaIp")}>
+                        <span className="flex items-center gap-1 justify-end text-cyan-400/60">NASA IP <SortIcon col="nasaIp" /></span>
                       </th>
-                      <th className="px-3 py-2">
-                        <span className="text-esa/70">ESA IP</span>
+                      <th className="px-3 py-2.5 text-right cursor-pointer hover:text-orange-400" onClick={() => handleSort("esaIp")}>
+                        <span className="flex items-center gap-1 justify-end text-orange-400/60">ESA IP <SortIcon col="esaIp" /></span>
                       </th>
-                      <th
-                        className="px-3 py-2 cursor-pointer hover:text-white transition-colors"
-                        onClick={() => handleSort("palermoDelta")}
-                      >
-                        <span className="flex items-center gap-1">
-                          Δ PS
-                          {sortField === "palermoDelta" &&
-                            (sortAsc ? (
-                              <ChevronUp size={10} />
-                            ) : (
-                              <ChevronDown size={10} />
-                            ))}
-                        </span>
+                      <th className="px-3 py-2.5 text-right cursor-pointer hover:text-white" onClick={() => handleSort("palermoDelta")}>
+                        <span className="flex items-center gap-1 justify-end">ΔPS <SortIcon col="palermoDelta" /></span>
                       </th>
-                      <th className="px-3 py-2">DIVERGENCE</th>
-                      <th className="px-3 py-2">SRC</th>
+                      <th className="px-3 py-2.5 text-right cursor-pointer hover:text-white" onClick={() => handleSort("probabilityRatio")}>
+                        <span className="flex items-center gap-1 justify-end">Ratio <SortIcon col="probabilityRatio" /></span>
+                      </th>
+                      <th className="px-3 py-2.5 text-center">Sev</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedThreats.map((threat, idx) => (
-                      <tr
-                        key={`${threat.designation}-${idx}`}
-                        onClick={() => setSelectedThreat(threat)}
-                        className={`border-b border-panel-border/50 cursor-pointer transition-colors hover:bg-zinc-800/40 ${
-                          selectedThreat?.designation === threat.designation
-                            ? "bg-zinc-800/60"
-                            : ""
-                        }`}
-                      >
-                        <td className="px-3 py-2">
-                          <div className="font-mono text-xs text-white">
-                            {threat.designation}
-                          </div>
-                          <div className="text-[10px] text-zinc-600">
-                            {threat.fullname}
-                          </div>
-                        </td>
-                        <td className="px-3 py-2 data-readout text-zinc-400">
-                          {threat.nasa.diameterKm > 0
-                            ? threat.nasa.diameterKm.toFixed(3)
-                            : (threat.esa.diameterM / 1000).toFixed(3)}
-                        </td>
-                        <td className="px-3 py-2 data-readout text-nasa">
-                          {threat.nasa.ip > 0
-                            ? formatSciNotation(threat.nasa.ip)
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2 data-readout text-esa">
-                          {threat.esa.ipCum > 0
-                            ? formatSciNotation(threat.esa.ipCum)
-                            : "—"}
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`data-readout ${
-                              Math.abs(threat.palermoDelta) > 1
-                                ? "text-red-400"
-                                : Math.abs(threat.palermoDelta) > 0.3
-                                  ? "text-amber-400"
-                                  : "text-emerald-400"
-                            }`}
-                          >
-                            {threat.palermoDelta > 0 ? "+" : ""}
-                            {threat.palermoDelta.toFixed(3)}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 w-24">
-                          <DivergenceGauge ratio={threat.probabilityRatio} />
-                        </td>
-                        <td className="px-3 py-2">
-                          <span
-                            className={`text-[9px] font-mono px-1.5 py-0.5 rounded ${
-                              threat.sourceMatch === "BOTH"
-                                ? "bg-zinc-700/50 text-zinc-300"
-                                : threat.sourceMatch === "NASA_ONLY"
-                                  ? "bg-nasa/10 text-nasa"
-                                  : "bg-esa/10 text-esa"
-                            }`}
-                          >
-                            {threat.sourceMatch}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
+                    {filtered.slice(0, 100).map((t, i) => {
+                      const isSel = selected?.designation === t.designation;
+                      const sevColor =
+                        t.divergenceSeverity === "CRITICAL" ? "text-red-400 bg-red-500/10" :
+                        t.divergenceSeverity === "HIGH" ? "text-orange-400 bg-orange-500/10" :
+                        t.divergenceSeverity === "MODERATE" ? "text-amber-400 bg-amber-500/10" :
+                        t.divergenceSeverity === "LOW" ? "text-emerald-400 bg-emerald-500/10" :
+                        "text-zinc-500 bg-zinc-700/20";
+                      return (
+                        <tr
+                          key={`${t.designation}-${i}`}
+                          onClick={() => setSelected(isSel ? null : t)}
+                          className={`border-b border-zinc-800/30 cursor-pointer transition-colors ${
+                            isSel ? "bg-cyan-500/[0.06]" : "hover:bg-zinc-800/30"
+                          }`}
+                        >
+                          <td className="px-3 py-2">
+                            <span className="font-mono text-xs text-white">{t.designation}</span>
+                            <span className="block text-[9px] text-zinc-600 truncate max-w-[140px]">{t.fullname}</span>
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-[11px] text-zinc-400">
+                            {(t.nasa.diameterKm > 0 ? t.nasa.diameterKm : t.esa.diameterM / 1000).toFixed(3)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-[11px] text-cyan-400">
+                            {t.nasa.ip > 0 ? sci(t.nasa.ip) : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-[11px] text-orange-400">
+                            {t.esa.ipCum > 0 ? sci(t.esa.ipCum) : "—"}
+                          </td>
+                          <td className={`px-3 py-2 text-right font-mono text-[11px] ${
+                            Math.abs(safeNum(t.palermoDelta)) > 1 ? "text-red-400" :
+                            Math.abs(safeNum(t.palermoDelta)) > 0.3 ? "text-amber-400" : "text-emerald-400"
+                          }`}>
+                            {safeNum(t.palermoDelta) > 0 ? "+" : ""}{safeNum(t.palermoDelta).toFixed(3)}
+                          </td>
+                          <td className="px-3 py-2 text-right font-mono text-[11px] text-zinc-400">
+                            {safeNum(t.probabilityRatio) > 0 && safeNum(t.probabilityRatio) < 900
+                              ? safeNum(t.probabilityRatio).toFixed(2) + "×"
+                              : "—"}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            <span className={`text-[8px] font-mono px-1.5 py-0.5 rounded ${sevColor}`}>
+                              {t.divergenceSeverity.slice(0, 4)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -452,171 +321,68 @@ export default function Home() {
           )}
 
           {/* DETAIL PANEL */}
-          {selectedThreat && (
-            <div className="panel-glass p-4">
+          {selected && (
+            <div className="rounded-lg border border-zinc-700/50 bg-[#0a0a12]/80 backdrop-blur p-4">
               <div className="flex items-center justify-between mb-3">
                 <h3 className="font-mono text-sm text-white flex items-center gap-2">
                   <Zap size={14} className="text-amber-400" />
-                  DEEP DIVE: {selectedThreat.designation}
+                  {selected.designation}
+                  <span className="text-zinc-600 text-xs font-normal">{selected.fullname}</span>
                 </h3>
-                <button
-                  onClick={() => setSelectedThreat(null)}
-                  className="text-zinc-500 hover:text-white text-xs"
-                >
-                  ✕ CLOSE
-                </button>
+                <button onClick={() => setSelected(null)} className="text-zinc-600 hover:text-white text-xs font-mono">✕</button>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 {/* NASA */}
-                <div className="space-y-2 p-3 rounded-md bg-nasa/5 border border-nasa/20">
-                  <h4 className="text-[10px] font-mono text-nasa uppercase tracking-widest flex items-center gap-1">
-                    <Radio size={10} /> NASA SENTRY-II
-                  </h4>
-                  <DetailRow
-                    label="Impact Prob"
-                    value={formatSciNotation(selectedThreat.nasa.ip)}
-                  />
-                  <DetailRow
-                    label="Palermo (reported)"
-                    value={selectedThreat.nasa.psCum.toFixed(3)}
-                  />
-                  <DetailRow
-                    label="Palermo (recomputed)"
-                    value={selectedThreat.palermoNasaRecomputed.toFixed(4)}
-                  />
-                  <DetailRow
-                    label="Torino Scale"
-                    value={selectedThreat.nasa.tsMax.toString()}
-                  />
-                  <DetailRow
-                    label="V∞ (km/s)"
-                    value={selectedThreat.nasa.vInfKmS.toFixed(2)}
-                  />
-                  <DetailRow
-                    label="V impact (km/s)"
-                    value={selectedThreat.nasa.vImpKmS.toFixed(2)}
-                  />
-                  <DetailRow
-                    label="Energy (Mt)"
-                    value={selectedThreat.nasa.energyMt.toExponential(2)}
-                  />
-                  <DetailRow
-                    label="N Impactors"
-                    value={selectedThreat.nasa.nImp.toString()}
-                  />
-                  <DetailRow
-                    label="Method"
-                    value={selectedThreat.nasa.method}
-                  />
-                  <DetailRow label="Range" value={selectedThreat.nasa.range} />
-                  <div className="pt-1 border-t border-nasa/10">
-                    <span className="text-[9px] font-mono text-nasa/60">
-                      {selectedThreat.nasa.hasNonGrav
-                        ? "✓ YARKOVSKY EFFECT MODELED (A1, A2)"
-                        : "✗ NO NON-GRAV MODELING"}
-                    </span>
-                  </div>
+                <div className="rounded-md border border-cyan-500/15 bg-cyan-500/[0.03] p-3 space-y-1.5">
+                  <p className="text-[9px] font-mono text-cyan-400 uppercase tracking-[0.15em] flex items-center gap-1">
+                    <Radio size={9} /> NASA Sentry-II
+                  </p>
+                  <Row l="Impact Prob" v={sci(safeNum(selected.nasa.ip))} />
+                  <Row l="Palermo (rep)" v={safeNum(selected.nasa.psCum).toFixed(3)} />
+                  <Row l="Palermo (calc)" v={safeNum(selected.palermoNasaRecomputed).toFixed(4)} />
+                  <Row l="Torino" v={String(selected.nasa.tsMax)} />
+                  <Row l="V∞ km/s" v={safeNum(selected.nasa.vInfKmS).toFixed(2)} />
+                  <Row l="Energy Mt" v={safeNum(selected.nasa.energyMt).toExponential(2)} />
+                  <Row l="Method" v={selected.nasa.method || "IOBS"} />
+                  <p className="text-[8px] font-mono text-cyan-400/50 pt-1 border-t border-cyan-500/10">
+                    {selected.nasa.hasNonGrav ? "✓ YARKOVSKY A1,A2" : "✗ NO NON-GRAV"}
+                  </p>
                 </div>
 
                 {/* ESA */}
-                <div className="space-y-2 p-3 rounded-md bg-esa/5 border border-esa/20">
-                  <h4 className="text-[10px] font-mono text-esa uppercase tracking-widest flex items-center gap-1">
-                    <Radio size={10} /> ESA NEOCC/AEGIS
-                  </h4>
-                  <DetailRow
-                    label="Impact Prob (cum)"
-                    value={formatSciNotation(selectedThreat.esa.ipCum)}
-                  />
-                  <DetailRow
-                    label="Impact Prob (max)"
-                    value={formatSciNotation(selectedThreat.esa.ipMax)}
-                  />
-                  <DetailRow
-                    label="Palermo (reported)"
-                    value={selectedThreat.esa.psCum.toFixed(3)}
-                  />
-                  <DetailRow
-                    label="Palermo (recomputed)"
-                    value={selectedThreat.palermoEsaRecomputed.toFixed(4)}
-                  />
-                  <DetailRow
-                    label="Torino Scale"
-                    value={selectedThreat.esa.torinoScale.toString()}
-                  />
-                  <DetailRow
-                    label="V impact (km/s)"
-                    value={selectedThreat.esa.velocityKmS.toFixed(2)}
-                  />
-                  <DetailRow
-                    label="Diameter (m)"
-                    value={selectedThreat.esa.diameterM.toFixed(0)}
-                  />
-                  <DetailRow
-                    label="VI Max Date"
-                    value={selectedThreat.esa.viMaxDate}
-                  />
-                  <div className="pt-1 border-t border-esa/10">
-                    <span className="text-[9px] font-mono text-esa/60">
-                      ✗ GRAVITATIONAL-ONLY MODEL (NO A3)
-                    </span>
-                  </div>
+                <div className="rounded-md border border-orange-500/15 bg-orange-500/[0.03] p-3 space-y-1.5">
+                  <p className="text-[9px] font-mono text-orange-400 uppercase tracking-[0.15em] flex items-center gap-1">
+                    <Radio size={9} /> ESA NEOCC/Aegis
+                  </p>
+                  <Row l="Impact Prob" v={sci(safeNum(selected.esa.ipCum))} />
+                  <Row l="Palermo (rep)" v={safeNum(selected.esa.psCum).toFixed(3)} />
+                  <Row l="Palermo (calc)" v={safeNum(selected.palermoEsaRecomputed).toFixed(4)} />
+                  <Row l="Torino" v={String(selected.esa.torinoScale)} />
+                  <Row l="V imp km/s" v={safeNum(selected.esa.velocityKmS).toFixed(2)} />
+                  <Row l="Diameter m" v={safeNum(selected.esa.diameterM).toFixed(0)} />
+                  <Row l="VI Date" v={selected.esa.viMaxDate || "—"} />
+                  <p className="text-[8px] font-mono text-orange-400/50 pt-1 border-t border-orange-500/10">
+                    ✗ GRAV-ONLY (NO A3)
+                  </p>
                 </div>
 
-                {/* DIVERGENCE + YARKOVSKY */}
-                <div className="space-y-2 p-3 rounded-md bg-red-500/5 border border-red-500/20">
-                  <h4 className="text-[10px] font-mono text-red-400 uppercase tracking-widest flex items-center gap-1">
-                    <AlertTriangle size={10} /> DIVERGENCE + YARKOVSKY
-                  </h4>
-                  <DetailRow
-                    label="IP Ratio (NASA/ESA)"
-                    value={selectedThreat.probabilityRatio.toFixed(4) + "×"}
-                  />
-                  <DetailRow
-                    label="Δ Palermo Scale"
-                    value={selectedThreat.palermoDelta.toFixed(4)}
-                  />
-                  <DetailRow
-                    label="Spatial Δr (km)"
-                    value={selectedThreat.spatialDivergenceKm.toFixed(1)}
-                  />
-                  <DetailRow
-                    label="da/dt (AU/Myr)"
-                    value={(
-                      selectedThreat.yarkovskyDriftAUDay * 365.25e6
-                    ).toExponential(3)}
-                  />
-                  <DetailRow
-                    label="Yarkovsky shift (km)"
-                    value={selectedThreat.yarkovskyPositionShiftKm.toFixed(1)}
-                  />
-                  <DetailRow
-                    label="Severity"
-                    value={selectedThreat.divergenceSeverity}
-                  />
-                  <div className="pt-2 border-t border-red-500/10">
-                    <p className="text-[9px] font-mono text-zinc-500 leading-relaxed">
-                      Sentry-II IOBS includes Yarkovsky thermal acceleration
-                      (da/dt ~ 10⁻⁴ AU/Myr). Aegis LOV runs gravitational N-body
-                      only. Spatial divergence grows as Δr ∝ (da/dt)·t² via
-                      mean-motion coupling.
-                    </p>
-                  </div>
-                  <div className="flex gap-3 mt-1">
-                    <a
-                      href={`https://ssd-api.jpl.nasa.gov/sentry.api?des=${encodeURIComponent(selectedThreat.designation)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[10px] font-mono text-nasa/70 hover:text-nasa transition-colors"
-                    >
-                      <ExternalLink size={9} /> NASA RAW
+                {/* DIVERGENCE */}
+                <div className="rounded-md border border-red-500/15 bg-red-500/[0.03] p-3 space-y-1.5">
+                  <p className="text-[9px] font-mono text-red-400 uppercase tracking-[0.15em] flex items-center gap-1">
+                    <AlertTriangle size={9} /> Divergence
+                  </p>
+                  <Row l="IP Ratio" v={safeNum(selected.probabilityRatio).toFixed(3) + "×"} />
+                  <Row l="ΔPS" v={safeNum(selected.palermoDelta).toFixed(4)} />
+                  <Row l="Δr km" v={safeNum(selected.spatialDivergenceKm).toFixed(1)} />
+                  <Row l="da/dt AU/Myr" v={(safeNum(selected.yarkovskyDriftAUDay) * 365.25e6).toExponential(2)} />
+                  <Row l="Severity" v={selected.divergenceSeverity} />
+                  <div className="flex gap-3 pt-1 border-t border-red-500/10">
+                    <a href={`https://ssd-api.jpl.nasa.gov/sentry.api?des=${encodeURIComponent(selected.designation)}`} target="_blank" rel="noopener noreferrer" className="text-[9px] font-mono text-cyan-400/60 hover:text-cyan-400 flex items-center gap-0.5">
+                      <ExternalLink size={8} /> NASA
                     </a>
-                    <a
-                      href={`https://neo.ssa.esa.int/PSDB-portlet/download?file=${encodeURIComponent(selectedThreat.designation)}.risk`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-[10px] font-mono text-esa/70 hover:text-esa transition-colors"
-                    >
-                      <ExternalLink size={9} /> ESA RAW
+                    <a href={`https://neo.ssa.esa.int/PSDB-portlet/download?file=${encodeURIComponent(selected.designation)}.risk`} target="_blank" rel="noopener noreferrer" className="text-[9px] font-mono text-orange-400/60 hover:text-orange-400 flex items-center gap-0.5">
+                      <ExternalLink size={8} /> ESA
                     </a>
                   </div>
                 </div>
@@ -627,15 +393,11 @@ export default function Home() {
 
         {/* RIGHT: GLOBE */}
         {showGlobe && (
-          <div className="w-full lg:w-[45%] xl:w-[40%] h-[40vh] lg:h-[calc(100vh-64px)] border-l border-panel-border relative">
-            <OrbitsViewer
-              threats={data?.threats ?? []}
-              selected={selectedThreat}
-            />
-            <div className="absolute top-3 left-3 z-10 panel-glass px-3 py-1.5">
-              <span className="text-[10px] font-mono text-zinc-400 flex items-center gap-1.5">
-                <Globe2 size={10} className="text-nasa" />
-                TRAJECTORY DIVERGENCE VIEW
+          <div className="w-full lg:w-[42%] h-[35vh] lg:h-[calc(100vh-60px)] border-l border-zinc-800/40 relative">
+            <OrbitsViewer threats={data?.threats ?? []} selected={selected} />
+            <div className="absolute top-3 left-3 z-10 px-3 py-1.5 rounded-md bg-[#0a0a12]/80 border border-zinc-800/50 backdrop-blur">
+              <span className="text-[9px] font-mono text-zinc-500 flex items-center gap-1.5">
+                <Globe2 size={9} className="text-cyan-400" /> TRAJECTORY VIEW
               </span>
             </div>
           </div>
@@ -643,18 +405,41 @@ export default function Home() {
       </div>
 
       {/* FOOTER */}
-      <footer className="border-t border-panel-border bg-panel/40 px-4 py-2">
-        <div className="max-w-[1920px] mx-auto flex items-center justify-between text-[9px] font-mono text-zinc-600">
-          <span>
-            AEGIS-SENTRY v2.0 • PS = log₁₀(IP / (f_B × T)) • f_B = 0.03 ×
-            E^(-4/5) yr⁻¹ • Kepler ε=10⁻¹⁴
-          </span>
-          <span>
-            DATA: NASA/JPL CNEOS Sentry-II + ESA NEOCC/Aegis • NOT FOR
-            OPERATIONAL USE
-          </span>
+      <footer className="border-t border-zinc-800/40 bg-[#0a0a12]/60 px-6 py-2">
+        <div className="max-w-[1920px] mx-auto flex items-center justify-between text-[8px] font-mono text-zinc-700">
+          <span>PS = log₁₀(IP / (0.03·E^(-4/5)·T)) • Kepler ε=10⁻¹⁴ • Yarkovsky: Vokrouhlický (1998)</span>
+          <span>NASA/JPL CNEOS + ESA NEOCC • NOT FOR OPERATIONAL USE</span>
         </div>
       </footer>
     </div>
+  );
+}
+
+function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className="rounded-lg border border-zinc-800/50 bg-[#0a0a12]/60 px-3 py-2">
+      <p className="text-[8px] font-mono text-zinc-600 uppercase tracking-wider">{label}</p>
+      <p className={`font-mono text-lg font-bold ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function Row({ l, v }: { l: string; v: string }) {
+  return (
+    <div className="flex justify-between items-baseline">
+      <span className="text-[9px] text-zinc-600">{l}</span>
+      <span className="font-mono text-[11px] text-zinc-300">{v}</span>
+    </div>
+  );
+}
+
+function StatusPill({ ok, label }: { ok: boolean; label: string }) {
+  return (
+    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[9px] font-mono border ${
+      ok ? "text-emerald-400 border-emerald-500/20 bg-emerald-500/5" : "text-red-400 border-red-500/20 bg-red-500/5"
+    }`}>
+      {ok ? <Wifi size={9} /> : <WifiOff size={9} />}
+      {label}
+    </span>
   );
 }
