@@ -150,3 +150,13 @@ export interface ThreatsApiResponse {
     propagationEpochJD: number;
   };
 }
+
+/**
+ * Props for the OrbitsViewer CesiumJS component.
+ * Defined here (not in the component file) to avoid Next.js 14
+ * page type validation conflicts.
+ */
+export interface OrbitsViewerProps {
+  threats: DivergenceMetrics[];
+  selected: DivergenceMetrics | null;
+}
