@@ -4,152 +4,206 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 /**
- * AEGIS-SENTRY v3.5 — Public REST API Documentation
+ * AEGIS·SENTRY v4.0 — Public REST API Documentation
  *
- * Serves OpenAPI-style documentation for all engine endpoints.
+ * OpenAPI 3.1-style documentation for all engine endpoints.
  * Enables third-party integration, research reproducibility,
  * and institutional adoption.
+ *
+ * Rate limits:
+ *   - Catalogue endpoints: 100 req/min, 20 burst
+ *   - Compute endpoints:   30 req/min, 5 burst
+ *   - Live feeds:          120 req/min, 30 burst
+ *   - Collaboration:       60 req/min, 15 burst
  */
 export async function GET() {
   const docs = {
+    openapi: "3.1.0",
     info: {
       title: "AEGIS·SENTRY Planetary Defense Readiness Engine API",
-      version: "3.5.0",
+      version: "4.0.0",
       description:
         "Real-time multi-agency asteroid risk divergence engine. " +
         "Compares NASA Sentry-II and ESA NEOCC/Aegis impact probability calculations. " +
         "Includes Yarkovsky sensitivity, gravitational keyhole detection, " +
-        "impact corridor projection, deflection planning, and Rubin LSST triage.",
+        "impact corridor projection, deflection planning, Rubin LSST triage, " +
+        "observatory integration, collaboration, and export.",
       contact: {
         name: "AEGIS·SENTRY Research",
         url: "https://aegis-sentry.vercel.app",
       },
       license: {
-        name: "Research Use Only — NOT FOR OPERATIONAL DECISIONS",
+        name: "CC BY-NC 4.0 — Research Use Only",
+        url: "https://creativecommons.org/licenses/by-nc/4.0/",
       },
     },
     servers: [
       {
         url: "https://aegis-sentry.vercel.app",
-        description: "Production (Vercel Edge, IAD1)",
+        description: "Production (Vercel, IAD1)",
       },
     ],
-    endpoints: [
-      {
-        path: "/api/threats",
-        method: "GET",
-        summary: "Full threat catalogue with multi-agency divergence",
-        description:
-          "Fetches NASA Sentry-II and ESA NEOCC risk lists, cross-matches objects, " +
-          "computes Palermo Scale divergence, Yarkovsky Sensitivity Index, " +
-          "gravitational keyhole susceptibility, impact corridors, and Rubin Readiness Score.",
-        parameters: [],
-        response: {
-          threats: "Array<AdvancedThreat> (up to 300 objects)",
-          metadata: {
-            nasaCount: "number — NASA Sentry objects",
-            esaCount: "number — ESA NEOCC objects",
-            matchedCount: "number — Dual-agency matched pairs",
-            criticalCount: "number — CRITICAL divergence severity",
-            ysiDominantCount: "number — Yarkovsky-dominated orbits",
-            keyholeAlertCount: "number — Keyhole σ-overlap alerts",
-            corridorCount: "number — Impact corridors projected",
-            readinessCriticalCount: "number — Rubin CRITICAL priority",
+    paths: {
+      "/api/threats": {
+        get: {
+          summary: "Full threat catalogue with multi-agency divergence",
+          description:
+            "Fetches NASA Sentry-II and ESA NEOCC risk lists, cross-matches objects, " +
+            "computes Palermo Scale divergence, YSI, keyholes, corridors, readiness, " +
+            "and consensus scores.",
+          tags: ["Catalogue"],
+          parameters: [],
+          responses: {
+            "200": {
+              description: "Threat catalogue (up to 300 objects)",
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { threats: { type: "array" }, metadata: { type: "object" } } },
+                },
+              },
+            },
           },
+          "x-rate-limit": "100/min, 20 burst",
         },
-        cache: "s-maxage=300, stale-while-revalidate=600",
-        example: "GET /api/threats",
       },
-      {
-        path: "/api/object/{designation}",
-        method: "GET",
-        summary: "Deep dossier for a single object",
-        description:
-          "Fetches full orbital elements from NASA SBDB + ESA .ke1, " +
-          "propagates 1/10/50-year divergence, computes Palermo Scale, " +
-          "Yarkovsky drift, keyhole field, impact corridor, and readiness.",
-        parameters: [
-          { name: "designation", in: "path", required: true, type: "string", example: "2024 YR4" },
-        ],
-        response: {
-          nasa: "Sentry data + SBDB elements + non-grav params",
-          esa: "Orbital elements + risk file",
-          propagation: "1yr, 10yr, 50yr position divergence",
-          palermo: "Full Palermo Scale computation",
-          advanced: "YSI + Keyhole + Corridor + Readiness",
+      "/api/object/{designation}": {
+        get: {
+          summary: "Deep dossier for a single object",
+          tags: ["Catalogue"],
+          parameters: [
+            { name: "designation", in: "path", required: true, schema: { type: "string" }, example: "2024 YR4" },
+          ],
+          "x-rate-limit": "60/min, 10 burst",
         },
-        example: "GET /api/object/2024%20YR4",
       },
-      {
-        path: "/api/approaches",
-        method: "GET",
-        summary: "Close approach data from NASA CAD",
-        description:
-          "Fetches all Earth close approaches within 0.05 AU for the next 100 years. " +
-          "Returns per-object summaries with next approach date, distance, velocity, and MOID.",
-        parameters: [
-          { name: "des", in: "query", required: false, type: "string", description: "Specific object designation" },
-        ],
-        response: {
-          approaches: "Array<CloseApproachSummary>",
-          count: "number",
+      "/api/approaches": {
+        get: {
+          summary: "Close approach data from NASA CAD",
+          tags: ["Catalogue"],
+          parameters: [
+            { name: "des", in: "query", required: false, schema: { type: "string" } },
+          ],
+          "x-rate-limit": "100/min, 20 burst",
         },
-        example: "GET /api/approaches?des=Apophis",
       },
-      {
-        path: "/api/deflect",
-        method: "GET",
-        summary: "Deflection Δv calculator with keyhole-aware safety check",
-        description:
-          "Computes the velocity change required to deflect an asteroid, " +
-          "checks whether the deflection pushes it into a gravitational keyhole, " +
-          "and computes the safe deflection cone.",
-        parameters: [
-          { name: "des", in: "query", required: true, type: "string" },
-          { name: "method", in: "query", required: false, type: "string", enum: ["KINETIC", "GRAVITY_TRACTOR", "NUCLEAR_STANDOFF"] },
-          { name: "warning", in: "query", required: false, type: "number", description: "Warning time (years)" },
-          { name: "scMass", in: "query", required: false, type: "number", description: "Spacecraft mass (kg)" },
-          { name: "scVel", in: "query", required: false, type: "number", description: "Impact velocity (km/s)" },
-          { name: "beta", in: "query", required: false, type: "number", description: "Momentum enhancement factor" },
-        ],
-        response: {
-          mission: "Δv achieved, miss distance, margin, launch lead time",
-          keyholeSafety: "Safe/unsafe, danger keyholes, safe cone",
-          asteroid: "Mass, diameter, energy comparisons",
-          recommendation: "Actionable mission assessment",
+      "/api/deflect": {
+        get: {
+          summary: "Deflection Δv calculator with keyhole-aware safety check",
+          tags: ["Computation"],
+          parameters: [
+            { name: "des", in: "query", required: true, schema: { type: "string" } },
+            { name: "method", in: "query", schema: { type: "string", enum: ["KINETIC", "GRAVITY_TRACTOR", "NUCLEAR_STANDOFF"] } },
+            { name: "warning", in: "query", schema: { type: "number" } },
+            { name: "scMass", in: "query", schema: { type: "number" } },
+            { name: "scVel", in: "query", schema: { type: "number" } },
+            { name: "beta", in: "query", schema: { type: "number" } },
+          ],
+          "x-rate-limit": "30/min, 5 burst",
         },
-        example: "GET /api/deflect?des=2024%20YR4&method=KINETIC&warning=10&scMass=500",
       },
-      {
-        path: "/api/evolution",
-        method: "GET",
-        summary: "Risk evolution timeline + observation arc analysis",
-        description:
-          "Models how impact probability evolves over time, tracks observation arc quality, " +
-          "computes loss date, and identifies Yarkovsky dominance time.",
-        parameters: [
-          { name: "des", in: "query", required: true, type: "string" },
-        ],
-        response: {
-          observationArc: "Arc length, quality, U parameter, loss date",
-          riskEvolution: "IP(t) timeline, trend, NASA-ESA divergence trend",
-          current: "Current IP, diameter, Yarkovsky status",
+      "/api/evolution": {
+        get: {
+          summary: "Risk evolution timeline + observation arc analysis",
+          tags: ["Computation"],
+          parameters: [
+            { name: "des", in: "query", required: true, schema: { type: "string" } },
+          ],
+          "x-rate-limit": "30/min, 5 burst",
         },
-        example: "GET /api/evolution?des=Apophis",
       },
-      {
-        path: "/api/docs",
-        method: "GET",
-        summary: "This documentation",
-        description: "Returns the full API documentation in JSON format.",
-        parameters: [],
-        example: "GET /api/docs",
+      "/api/observatory": {
+        get: {
+          summary: "Live observatory alert feed",
+          description:
+            "Unified alert stream from NASA CAD, MPC NEACP, ATLAS, Rubin/LSST, " +
+            "Pan-STARRS, and Catalina Sky Survey.",
+          tags: ["Live Feeds"],
+          parameters: [
+            { name: "mode", in: "query", schema: { type: "string", enum: ["live", "simulated"] } },
+            { name: "limit", in: "query", schema: { type: "integer", maximum: 100 } },
+          ],
+          "x-rate-limit": "120/min, 30 burst",
+        },
       },
-    ],
+      "/api/annotations": {
+        get: {
+          summary: "List annotations for an object",
+          tags: ["Collaboration"],
+          parameters: [
+            { name: "des", in: "query", schema: { type: "string" } },
+          ],
+          "x-rate-limit": "60/min, 15 burst",
+        },
+        post: {
+          summary: "Create a new annotation",
+          tags: ["Collaboration"],
+          requestBody: {
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["targetDesignation", "body", "author"],
+                  properties: {
+                    targetDesignation: { type: "string" },
+                    type: { type: "string", enum: ["COMMENT", "RISK_ASSESSMENT", "OBSERVATION_LOG", "DEFLECTION_NOTE", "YARKOVSKY_NOTE", "KEYHOLE_NOTE", "CORRIDOR_NOTE", "FLAG", "RESOLUTION"] },
+                    priority: { type: "string", enum: ["INFO", "LOW", "MODERATE", "HIGH", "CRITICAL"] },
+                    author: { type: "string" },
+                    authorRole: { type: "string" },
+                    body: { type: "string", maxLength: 5000 },
+                    tags: { type: "array", items: { type: "string" } },
+                    parentId: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          "x-rate-limit": "60/min, 15 burst",
+        },
+        patch: {
+          summary: "Update an annotation",
+          tags: ["Collaboration"],
+          "x-rate-limit": "60/min, 15 burst",
+        },
+        delete: {
+          summary: "Delete an annotation",
+          tags: ["Collaboration"],
+          parameters: [
+            { name: "id", in: "query", required: true, schema: { type: "string" } },
+          ],
+          "x-rate-limit": "60/min, 15 burst",
+        },
+      },
+      "/api/docs": {
+        get: {
+          summary: "This documentation",
+          tags: ["Meta"],
+        },
+      },
+    },
+    components: {
+      securitySchemes: {
+        rateLimit: {
+          type: "apiKey",
+          in: "header",
+          name: "X-API-Key",
+          description: "Optional API key for higher rate limits (contact for access)",
+        },
+      },
+    },
     rateLimiting: {
-      policy: "100 requests per minute per IP",
-      burst: "20 requests per second",
-      note: "NASA/ESA upstream APIs have their own rate limits. Cache responses.",
+      policy: "Token bucket per IP",
+      presets: {
+        catalogue: "100 req/min, 20 burst",
+        compute: "30 req/min, 5 burst",
+        live: "120 req/min, 30 burst",
+        collab: "60 req/min, 15 burst",
+      },
+      headers: [
+        "X-RateLimit-Limit",
+        "X-RateLimit-Remaining",
+        "X-RateLimit-Reset",
+        "Retry-After (on 429)",
+      ],
     },
     dataSources: [
       { name: "NASA CNEOS Sentry-II", url: "https://ssd-api.jpl.nasa.gov/sentry.api", refresh: "Real-time" },
@@ -157,6 +211,9 @@ export async function GET() {
       { name: "NASA CAD", url: "https://ssd-api.jpl.nasa.gov/cad.api", refresh: "Daily" },
       { name: "ESA NEOCC Risk List", url: "https://neo.ssa.esa.int/PSDB-portlet/download?file=esa_risk_list", refresh: "Daily" },
       { name: "ESA Keplerian Catalogue", url: "https://neo.ssa.esa.int/PSDB-portlet/download?file=neo_kc.cat", refresh: "Weekly" },
+      { name: "MPC NEACP", url: "https://www.minorplanetcenter.net/iau/NEACP.html", refresh: "Continuous" },
+      { name: "ATLAS", url: "https://fallingstar-data.com/forcedphot/", refresh: "Nightly" },
+      { name: "Rubin/LSST", url: "https://rubin-obs.lsst.io/", refresh: "Real-time (2026+)" },
     ],
     scientificReferences: [
       "Chesley et al. (2002) — Palermo Technical Impact Hazard Scale",
@@ -166,6 +223,10 @@ export async function GET() {
       "Carusi et al. (2002) — Asteroid deflection Δv computation",
       "Thomas et al. (2023) — DART β = 3.61 ± 0.19",
       "Muinonen et al. (2001) — Monte Carlo orbital sampling",
+      "Tonry et al. (2018) — ATLAS survey system",
+      "Ivezić et al. (2019) — LSST reference design",
+      "Wilkinson et al. (2016) — FAIR Data Principles",
+      "W3C Web Annotation Data Model (2017)",
       "NASA OIG IG-25-006 — Planetary defense strategic gaps",
     ],
     disclaimer:
@@ -174,13 +235,15 @@ export async function GET() {
       "All risk assessments should be verified through official channels: " +
       "NASA CNEOS (https://cneos.jpl.nasa.gov) and ESA NEOCC (https://neo.ssa.esa.int).",
     engine: {
-      version: "3.5.0",
+      version: "4.0.0",
       keplerSolver: "Newton-Raphson + Halley's, ε=10⁻¹⁴",
       yarkovskyModel: "Vokrouhlický 1998 diurnal thermal",
       keyholeModel: "Greenberg 2002 resonant return",
       deflectionModel: "Carusi 2002 + DART β calibration",
       corridorModel: "Chodas 2015 b-plane projection + Monte Carlo",
       consensusModel: "Weighted multi-component disagreement index",
+      rateLimiter: "Token bucket (RFC 6749 pattern)",
+      pwa: "Service Worker + Web App Manifest",
     },
   };
 
@@ -188,7 +251,7 @@ export async function GET() {
     headers: {
       "Cache-Control": "public, s-maxage=3600",
       "Content-Type": "application/json",
-      "X-Engine-Version": "3.5.0",
+      "X-Engine-Version": "4.0.0",
     },
   });
 }
