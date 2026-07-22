@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import {
   Shield, AlertTriangle, RefreshCw, ChevronDown, ChevronUp,
   Wifi, WifiOff, Filter, Search, LayoutDashboard, Table2,
-  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair, Rocket, Clock, Eye,
+  Target, KeyRound, Zap, Activity, ArrowUpRight, Radar, Crosshair, Rocket, Clock, Eye, Share2,
 } from "lucide-react";
 import OrbitsViewer from "@/components/OrbitsViewer";
 import CorridorMap from "@/components/CorridorMap";
@@ -16,6 +16,8 @@ import RiskMatrix from "@/components/RiskMatrix";
 import DeflectionPlanner from "@/components/DeflectionPlanner";
 import RiskTimeline from "@/components/RiskTimeline";
 import BlindSpotMap from "@/components/BlindSpotMap";
+import ThreatCard from "@/components/ThreatCard"; /* v3.5 */
+import { computeConsensus } from "@/lib/engine/consensus"; /* v3.5 */
 import type { AdvancedThreat, ThreatsApiResponse } from "@/lib/engine/types";
 
 type TabId = "overview" | "matrix" | "corridors" | "keyholes" | "yarkovsky" | "rubin" | "approaches" | "risk" | "deflect" | "timeline" | "blindspot";
@@ -79,6 +81,7 @@ export default function Home() {
   const [timelineData, setTimelineData] = useState<TimelineData | null>(null);
   const [timelineTarget, setTimelineTarget] = useState<string>("");
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [shareCard, setShareCard] = useState<AdvancedThreat | null>(null); /* v3.5 */
 
   useEffect(() => {
     const f = () => setUtc(new Date().toISOString().slice(11, 19));
@@ -133,6 +136,19 @@ export default function Home() {
     finally { setTimelineLoading(false); }
   }, []);
 
+  /* v3.5: Compute consensus for matched objects */
+  const consensusMap = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!data) return map;
+    for (const t of data.threats) {
+      if (t.sourceMatch === "BOTH" && t.nasa.ip > 0 && t.esa.ipCum > 0) {
+        const c = computeConsensus(t, t.ysi.ysi, t.nasa.hasNonGrav, 365);
+        map.set(t.designation, c.consensusScore);
+      }
+    }
+    return map;
+  }, [data]);
+
   const filtered = useMemo(() => {
     if (!data) return [];
     let list = data.threats;
@@ -173,6 +189,21 @@ export default function Home() {
   const topCorridors = useMemo(() => data ? [...data.threats].filter((t) => t.corridor.hasCorridor).sort((a, b) => b.corridor.lengthKm - a.corridor.lengthKm).slice(0, 10) : [], [data]);
   const keyholeFocus = selected ?? topKeyholes[0] ?? null;
 
+  /* v3.5: Consensus statistics */
+  const consensusStats = useMemo(() => {
+    if (!data) return { mean: 0, critical: 0, yarkDriven: 0 };
+    const matched = data.threats.filter((t) => t.sourceMatch === "BOTH" && t.nasa.ip > 0 && t.esa.ipCum > 0);
+    if (matched.length === 0) return { mean: 0, critical: 0, yarkDriven: 0 };
+    let sum = 0, crit = 0, yark = 0;
+    for (const t of matched) {
+      const c = computeConsensus(t, t.ysi.ysi, t.nasa.hasNonGrav, 365);
+      sum += c.consensusScore;
+      if (c.verificationPriority === "CRITICAL") crit++;
+      if (c.rootCause === "YARKOVSKY_MODELING") yark++;
+    }
+    return { mean: Math.round(sum / matched.length), critical: crit, yarkDriven: yark };
+  }, [data]);
+
   const TABS: Array<{ id: TabId; label: string; icon: React.ReactNode }> = [
     { id: "overview", label: "OVERVIEW", icon: <LayoutDashboard size={11} /> },
     { id: "matrix", label: "MATRIX", icon: <Table2 size={11} /> },
@@ -201,7 +232,7 @@ export default function Home() {
               <h1 className="text-base sm:text-lg font-black tracking-tight text-white leading-none truncate">
                 AEGIS<span className="text-cyan-400">·</span>SENTRY
                 <span className="ml-2 text-[10px] sm:text-xs font-normal text-zinc-500 tracking-wide">READINESS ENGINE</span>
-                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.4</span>
+                <span className="ml-2 text-[8px] font-mono text-cyan-400/60 border border-cyan-500/20 rounded px-1 py-0.5 align-middle">v3.5</span>
               </h1>
               <p className="text-[8px] sm:text-[9px] font-mono text-zinc-600 tracking-[0.15em] uppercase mt-0.5 truncate">
                 NASA Sentry-II ↔ ESA NEOCC/Aegis ↔ Rubin LSST Triage
@@ -253,7 +284,8 @@ export default function Home() {
               <p style={{ animationDelay: "0.9s" }}>▸ DEFLECTION Δv ENGINE</p>
               <p style={{ animationDelay: "0.95s" }}>▸ RISK EVOLUTION + ARC TRACKER</p>
               <p style={{ animationDelay: "1s" }}>▸ MONTE CARLO CORRIDOR + BLIND SPOT</p>
-              <p className="text-emerald-400" style={{ animationDelay: "1.05s" }}>▸ READINESS ENGINE READY</p>
+              <p style={{ animationDelay: "1.05s" }}>▸ CONSENSUS ENGINE + PUBLIC API</p>
+              <p className="text-emerald-400" style={{ animationDelay: "1.1s" }}>▸ READINESS ENGINE READY</p>
             </div>
           </div>
         )}
@@ -268,7 +300,7 @@ export default function Home() {
               <Kpi label="YSI-HIGH" value={md?.ysiDominantCount ?? 0} color="text-amber-400" />
               <Kpi label="KEYHOLES" value={md?.keyholeAlertCount ?? 0} color="text-purple-400" />
               <Kpi label="CORRIDORS" value={md?.corridorCount ?? 0} color="text-orange-400" />
-              <Kpi label="RRS CRIT" value={md?.readinessCriticalCount ?? 0} color="text-red-400" />
+              <Kpi label="CONSENSUS" value={consensusStats.mean} color={consensusStats.mean > 70 ? "text-emerald-400" : consensusStats.mean > 40 ? "text-amber-400" : "text-red-400"} />
               <Kpi label="TOP RRS" value={md?.topReadinessScore ?? 0} color="text-emerald-400" />
             </div>
 
@@ -298,6 +330,31 @@ export default function Home() {
                       ))}
                     </div>
                   </div>
+
+                  {/* v3.5: CONSENSUS PANEL */}
+                  <div className="rounded-lg border border-zinc-800/50 bg-[#080810]/50 p-3">
+                    <p className="text-[8px] font-mono text-zinc-500 uppercase tracking-[0.2em] mb-2 flex items-center gap-1.5">
+                      <Share2 size={10} className="text-cyan-400" /> MULTI-AGENCY CONSENSUS
+                    </p>
+                    <div className="grid grid-cols-3 gap-2 text-center mb-2">
+                      <div>
+                        <p className={`font-mono text-sm font-bold ${consensusStats.mean > 70 ? "text-emerald-400" : consensusStats.mean > 40 ? "text-amber-400" : "text-red-400"}`}>{consensusStats.mean}</p>
+                        <p className="text-[7px] font-mono text-zinc-700">MEAN SCORE</p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-sm font-bold text-red-400">{consensusStats.critical}</p>
+                        <p className="text-[7px] font-mono text-zinc-700">CRITICAL GAP</p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-sm font-bold text-amber-400">{consensusStats.yarkDriven}</p>
+                        <p className="text-[7px] font-mono text-zinc-700">YARK-DRIVEN</p>
+                      </div>
+                    </div>
+                    <p className="text-[7px] font-mono text-zinc-700">
+                      NASA IOBS+Yarkovsky vs ESA LOV grav-only • Fenucci 2024 §7.4
+                    </p>
+                  </div>
+
                   <div className="rounded-lg border border-zinc-800/50 bg-[#080810]/50 p-3">
                     <p className="text-[8px] font-mono text-zinc-500 uppercase tracking-[0.2em] mb-2">ENGINE LOG</p>
                     <div className="font-mono text-[9px] space-y-1 text-zinc-600">
@@ -311,6 +368,7 @@ export default function Home() {
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-emerald-400/70">DEFLECT</span> Δv engine + keyhole-aware planner online</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-cyan-400/70">TIMELINE</span> risk evolution + arc tracker online</p>
                       <p><span className="text-zinc-700">[{utc}]</span> <span className="text-purple-400/70">MC-CORRIDOR</span> Cholesky sampler + blind spot mapper online</p>
+                      <p><span className="text-zinc-700">[{utc}]</span> <span className="text-emerald-400/70">CONSENSUS</span> multi-agency agreement engine v3.5 online</p>
                     </div>
                   </div>
                 </div>
@@ -344,6 +402,7 @@ export default function Home() {
                           <th className="px-2.5 py-2 text-right cursor-pointer hover:text-amber-400" onClick={() => handleSort("ysi")}><span className="flex items-center gap-0.5 justify-end text-amber-400/50">YSI <SortIcon col="ysi" /></span></th>
                           <th className="px-2.5 py-2 text-right cursor-pointer hover:text-emerald-400" onClick={() => handleSort("rrs")}><span className="flex items-center gap-0.5 justify-end text-emerald-400/50">RRS <SortIcon col="rrs" /></span></th>
                           <th className="px-2.5 py-2 text-center">Sev</th>
+                          <th className="px-2.5 py-2 text-center">{/* v3.5: Share */}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -351,6 +410,7 @@ export default function Home() {
                           const isSel = selected?.designation === t.designation;
                           const sev = t.divergenceSeverity;
                           const sevCls = sev === "CRITICAL" ? "text-red-400 bg-red-500/10" : sev === "HIGH" ? "text-orange-400 bg-orange-500/10" : sev === "MODERATE" ? "text-amber-400 bg-amber-500/10" : sev === "LOW" ? "text-emerald-400 bg-emerald-500/10" : "text-zinc-600 bg-zinc-800/30";
+                          const cScore = consensusMap.get(t.designation);
                           return (
                             <tr key={`${t.designation}-${i}`} onClick={() => openDossier(t)} className={`border-b border-zinc-800/20 cursor-pointer transition-colors ${isSel ? "bg-cyan-500/[0.05]" : "hover:bg-zinc-800/20"}`}>
                               <td className="px-2.5 py-1.5"><span className="font-mono text-[11px] text-zinc-200">{t.designation}</span><span className="block text-[8px] text-zinc-700 truncate max-w-[130px]">{t.fullname}</span></td>
@@ -361,6 +421,11 @@ export default function Home() {
                               <td className={`px-2.5 py-1.5 text-right font-mono text-[10px] ${t.ysi.classification === "DOMINANT" ? "text-red-400" : t.ysi.classification === "HIGH" ? "text-orange-400" : t.ysi.classification === "MODERATE" ? "text-amber-400" : "text-emerald-400/70"}`}>{t.ysi.ysi.toFixed(2)}</td>
                               <td className="px-2.5 py-1.5 text-right"><span className={`font-mono text-[10px] font-bold ${t.readiness.priority === "CRITICAL" ? "text-red-400" : t.readiness.priority === "URGENT" ? "text-orange-400" : t.readiness.priority === "ELEVATED" ? "text-amber-400" : "text-emerald-400/80"}`}>{t.readiness.score}</span></td>
                               <td className="px-2.5 py-1.5 text-center"><span className={`text-[7px] font-mono px-1 py-0.5 rounded ${sevCls}`}>{sev.slice(0, 4)}</span></td>
+                              <td className="px-1.5 py-1.5 text-center">
+                                <button onClick={(e) => { e.stopPropagation(); setShareCard(t); }} className="text-zinc-700 hover:text-cyan-400 transition-colors" title="Share threat card">
+                                  <Share2 size={10} />
+                                </button>
+                              </td>
                             </tr>
                           );
                         })}
@@ -511,7 +576,7 @@ export default function Home() {
               </div>
             )}
 
-            {/* BLIND SPOT — Phase 3.4 */}
+            {/* BLIND SPOT */}
             {tab === "blindspot" && (
               <div className="space-y-3">
                 <div className="rounded-lg border border-zinc-800/50 overflow-hidden" style={{ height: "520px" }}>
@@ -532,9 +597,7 @@ export default function Home() {
                     achieves full operations. A city-killer approaching from the sunward direction would provide
                     less than 24 hours warning. NEO Surveyor (IR space telescope, 2027-2028) will address this gap.
                   </p>
-                  <p className="text-[7px] font-mono text-zinc-700 mt-2">
-                    Reference: NASA OIG IG-25-006 • Mainzer et al. (2019) • Chesley et al. (2024)
-                  </p>
+                  <p className="text-[7px] font-mono text-zinc-700 mt-2">Reference: NASA OIG IG-25-006 • Mainzer et al. (2019) • Chesley et al. (2024)</p>
                 </div>
               </div>
             )}
@@ -573,13 +636,27 @@ export default function Home() {
       {/* FOOTER */}
       <footer className="border-t border-zinc-800/30 px-5 py-2 mt-2">
         <div className="max-w-[1920px] mx-auto flex flex-wrap justify-between gap-2 text-[7px] font-mono text-zinc-800">
-          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026 • DEFLECTION: CARUSI 2002 / DART β=3.61 • ARC: BOWELL 2002 • RISK EVOLUTION: CHESLEY 2005 • MC-CORRIDOR: MUINONEN 2001 • CHOLESKY: PRESS 2007 • BLIND SPOT: NASA OIG IG-25-006</span>
-          <span>ENGINE v3.4 • NOT FOR OPERATIONAL USE</span>
+          <span>PS = log₁₀(IP/(0.03·E^(-4/5)·T)) • KEPLER ε=10⁻¹⁴ • YARKOVSKY: VOKROUHLICKÝ 1998 • CORRIDORS: CHODAS 2015 • KEYHOLES: GREENBERG 2002 • CAD: CNEOS 2026 • DEFLECTION: CARUSI 2002 / DART β=3.61 • ARC: BOWELL 2002 • RISK EVOLUTION: CHESLEY 2005 • MC-CORRIDOR: MUINONEN 2001 • CHOLESKY: PRESS 2007 • BLIND SPOT: NASA OIG IG-25-006 • CONSENSUS: FENUCCI 2024 §7.4</span>
+          <span>ENGINE v3.5 • NOT FOR OPERATIONAL USE • API: /api/docs</span>
         </div>
       </footer>
 
       {/* DOSSIER */}
       {dossierTarget && <ObjectDossier threat={dossierTarget} onClose={() => setDossierTarget(null)} />}
+
+      {/* v3.5: SHARE CARD MODAL */}
+      {shareCard && (
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={() => setShareCard(null)} />
+          <div className="relative w-full max-w-sm">
+            <ThreatCard
+              threat={shareCard}
+              consensusScore={consensusMap.get(shareCard.designation)}
+              onClose={() => setShareCard(null)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
