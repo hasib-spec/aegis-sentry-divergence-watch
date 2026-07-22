@@ -2,12 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Orbit, AlertTriangle } from "lucide-react";
-import type { DivergenceMetrics } from "@/lib/engine/types";
-
-interface OrbitsViewerProps {
-  threats: DivergenceMetrics[];
-  selected: DivergenceMetrics | null;
-}
+import type { OrbitsViewerProps } from "@/lib/engine/types";
 
 export default function OrbitsViewer({
   threats,
