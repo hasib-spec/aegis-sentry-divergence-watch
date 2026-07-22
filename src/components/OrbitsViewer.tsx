@@ -1,298 +1,231 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Orbit, AlertTriangle } from "lucide-react";
+import { useEffect, useRef, useCallback } from "react";
 import type { DivergenceMetrics } from "@/lib/engine/types";
-
-declare global {
-  interface Window {
-    Cesium: any;
-  }
-}
 
 interface Props {
   threats: DivergenceMetrics[];
   selected: DivergenceMetrics | null;
 }
 
+interface OrbitDraw {
+  designation: string;
+  a: number;
+  e: number;
+  angle: number;
+  nasaColor: string;
+  esaColor: string;
+  divergence: number;
+  isSelected: boolean;
+}
+
 export default function OrbitsViewer({ threats, selected }: Props) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const viewerRef = useRef<any>(null);
-  const entitiesRef = useRef<any[]>([]);
-  const [ready, setReady] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const animRef = useRef<number>(0);
+  const timeRef = useRef<number>(0);
 
-  useEffect(() => {
-    let mounted = true;
-    let resizeObserver: ResizeObserver | null = null;
+  const draw = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
 
-    function tryInit() {
-      if (!mounted) return;
-      const el = containerRef.current;
-      if (!el) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
 
-      // CRITICAL: Container must have actual pixel dimensions
-      const rect = el.getBoundingClientRect();
-      if (rect.width < 10 || rect.height < 10) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    const W = rect.width;
+    const H = rect.height;
 
-      if (!window.Cesium) {
-        // CesiumJS CDN not loaded yet, retry
-        setTimeout(tryInit, 300);
-        return;
-      }
-
-      try {
-        createViewer();
-      } catch (err) {
-        if (mounted) {
-          setError(err instanceof Error ? err.message : "WebGL init failed");
-        }
-      }
+    if (canvas.width !== W * dpr || canvas.height !== H * dpr) {
+      canvas.width = W * dpr;
+      canvas.height = H * dpr;
+      ctx.scale(dpr, dpr);
     }
 
-    function createViewer() {
-      const Cesium = window.Cesium;
-      const el = containerRef.current;
-      if (!Cesium || !el || viewerRef.current) return;
+    const cx = W / 2;
+    const cy = H / 2;
+    const maxR = Math.min(W, H) * 0.42;
+    const t = timeRef.current;
 
-      const viewer = new Cesium.Viewer(el, {
-        animation: false,
-        timeline: false,
-        baseLayerPicker: false,
-        geocoder: false,
-        homeButton: false,
-        sceneModePicker: false,
-        navigationHelpButton: false,
-        fullscreenButton: false,
-        vrButton: false,
-        infoBox: false,
-        selectionIndicator: false,
-        creditContainer: document.createElement("div"),
-        contextOptions: {
-          webgl: {
-            alpha: false,
-            depth: true,
-            stencil: false,
-            antialias: true,
-            powerPreference: "high-performance",
-            failIfMajorPerformanceCaveat: false,
-          },
-        },
-      });
+    // Clear
+    ctx.fillStyle = "#030308";
+    ctx.fillRect(0, 0, W, H);
 
-      // Dark globe appearance
-      viewer.scene.globe.baseColor = Cesium.Color.fromCssColorString("#0a1628");
-      viewer.scene.backgroundColor = Cesium.Color.fromCssColorString("#030308");
-      viewer.scene.globe.showGroundAtmosphere = false;
-      if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = false;
-      if (viewer.scene.sun) viewer.scene.sun.show = false;
-      if (viewer.scene.moon) viewer.scene.moon.show = false;
-
-      // Remove default imagery and add dark texture
-      viewer.imageryLayers.removeAll();
-      try {
-        const provider = new Cesium.TileMapServiceImageryProvider({
-          url: Cesium.buildModuleUrl("Assets/Textures/NaturalEarthII"),
-        });
-        viewer.imageryLayers.addImageryProvider(provider);
-        viewer.imageryLayers.get(0).alpha = 0.35;
-      } catch {
-        // Stay dark if texture unavailable
-      }
-
-      viewer.camera.setView({
-        destination: Cesium.Cartesian3.fromDegrees(0, 20, 3.5e8),
-      });
-
-      viewerRef.current = viewer;
-      setReady(true);
+    // Starfield
+    const starSeed = 42;
+    for (let i = 0; i < 120; i++) {
+      const sx = ((Math.sin(i * 127.1 + starSeed) * 0.5 + 0.5) * W);
+      const sy = ((Math.cos(i * 311.7 + starSeed) * 0.5 + 0.5) * H);
+      const brightness = 0.1 + 0.15 * Math.sin(t * 0.5 + i);
+      ctx.fillStyle = `rgba(255,255,255,${brightness})`;
+      ctx.fillRect(sx, sy, 1, 1);
     }
 
-    // Use ResizeObserver to detect when container gets real dimensions
-    const el = containerRef.current;
-    if (el) {
-      resizeObserver = new ResizeObserver(() => {
-        if (!ready && !viewerRef.current) {
-          tryInit();
-        }
-      });
-      resizeObserver.observe(el);
+    // Grid rings
+    ctx.strokeStyle = "rgba(0,229,255,0.04)";
+    ctx.lineWidth = 0.5;
+    for (let r = 1; r <= 5; r++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, (maxR / 5) * r, 0, Math.PI * 2);
+      ctx.stroke();
     }
 
-    // Also try after a delay as fallback
-    const fallbackTimer = setTimeout(tryInit, 1500);
-
-    return () => {
-      mounted = false;
-      clearTimeout(fallbackTimer);
-      if (resizeObserver) resizeObserver.disconnect();
-      if (viewerRef.current) {
-        try {
-          viewerRef.current.destroy();
-        } catch {
-          /* */
-        }
-        viewerRef.current = null;
-      }
-    };
-  }, []);
-
-  // Render orbits when data changes
-  useEffect(() => {
-    if (!ready || !viewerRef.current || !window.Cesium) return;
-
-    const Cesium = window.Cesium;
-    const viewer = viewerRef.current;
-
-    for (const entity of entitiesRef.current) {
-      try {
-        viewer.entities.remove(entity);
-      } catch {
-        /* */
-      }
-    }
-    entitiesRef.current = [];
-
-    const SCALE = 1e5;
-    const items = threats
-      .filter((t) => t.nasaPosition || t.esaPosition)
-      .slice(0, 40);
-
-    for (const t of items) {
-      const isSel = selected?.designation === t.designation;
-
-      if (t.nasaPosition) {
-        const p = t.nasaPosition;
-        entitiesRef.current.push(
-          viewer.entities.add({
-            position: new Cesium.Cartesian3(p.x / SCALE, p.y / SCALE, p.z / SCALE),
-            point: {
-              pixelSize: isSel ? 10 : 5,
-              color: Cesium.Color.fromCssColorString("#00e5ff").withAlpha(isSel ? 1 : 0.6),
-              outlineColor: Cesium.Color.WHITE.withAlpha(0.3),
-              outlineWidth: 1,
-            },
-          })
-        );
-      }
-
-      if (t.esaPosition) {
-        const p = t.esaPosition;
-        entitiesRef.current.push(
-          viewer.entities.add({
-            position: new Cesium.Cartesian3(p.x / SCALE, p.y / SCALE, p.z / SCALE),
-            point: {
-              pixelSize: isSel ? 10 : 4,
-              color: Cesium.Color.fromCssColorString("#ff6d00").withAlpha(isSel ? 1 : 0.5),
-              outlineColor: Cesium.Color.WHITE.withAlpha(0.2),
-              outlineWidth: 1,
-            },
-          })
-        );
-      }
-
-      if (t.nasaPosition && t.esaPosition && t.spatialDivergenceKm > 0) {
-        entitiesRef.current.push(
-          viewer.entities.add({
-            polyline: {
-              positions: [
-                new Cesium.Cartesian3(t.nasaPosition.x / SCALE, t.nasaPosition.y / SCALE, t.nasaPosition.z / SCALE),
-                new Cesium.Cartesian3(t.esaPosition.x / SCALE, t.esaPosition.y / SCALE, t.esaPosition.z / SCALE),
-              ],
-              width: isSel ? 3 : 1,
-              material: Cesium.Color.fromCssColorString("#ff0044").withAlpha(isSel ? 0.9 : 0.3),
-            },
-          })
-        );
-      }
-
-      if (isSel && t.nasaPosition) {
-        entitiesRef.current.push(
-          viewer.entities.add({
-            position: new Cesium.Cartesian3(t.nasaPosition.x / SCALE, t.nasaPosition.y / SCALE, t.nasaPosition.z / SCALE),
-            label: {
-              text: `${t.designation}\nΔPS: ${t.palermoDelta.toFixed(3)} | Δr: ${t.spatialDivergenceKm.toFixed(0)} km`,
-              font: "11px monospace",
-              fillColor: Cesium.Color.WHITE,
-              outlineColor: Cesium.Color.BLACK,
-              outlineWidth: 2,
-              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-              pixelOffset: new Cesium.Cartesian2(15, -15),
-              showBackground: true,
-              backgroundColor: Cesium.Color.fromCssColorString("#0a0a12").withAlpha(0.95),
-            },
-          })
-        );
-      }
-    }
+    // Grid cross
+    ctx.strokeStyle = "rgba(0,229,255,0.03)";
+    ctx.beginPath();
+    ctx.moveTo(cx - maxR, cy);
+    ctx.lineTo(cx + maxR, cy);
+    ctx.moveTo(cx, cy - maxR);
+    ctx.lineTo(cx, cy + maxR);
+    ctx.stroke();
 
     // Sun
-    entitiesRef.current.push(
-      viewer.entities.add({
-        position: Cesium.Cartesian3.ZERO,
-        point: {
-          pixelSize: 12,
-          color: Cesium.Color.fromCssColorString("#ffdd00"),
-          outlineColor: Cesium.Color.fromCssColorString("#ff8800"),
-          outlineWidth: 3,
-        },
-      })
-    );
+    const sunGlow = ctx.createRadialGradient(cx, cy, 0, cx, cy, 12);
+    sunGlow.addColorStop(0, "rgba(255,220,0,0.9)");
+    sunGlow.addColorStop(0.5, "rgba(255,140,0,0.4)");
+    sunGlow.addColorStop(1, "rgba(255,100,0,0)");
+    ctx.fillStyle = sunGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffdd00";
+    ctx.beginPath();
+    ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+    ctx.fill();
 
-    viewer.scene.requestRender();
-  }, [threats, selected, ready]);
+    // Earth orbit reference (1 AU)
+    const earthR = maxR * 0.35;
+    ctx.strokeStyle = "rgba(100,150,255,0.12)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.arc(cx, cy, earthR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
-  if (error) {
-    return (
-      <div className="w-full h-full flex items-center justify-center bg-[#030308]">
-        <div className="text-center p-6 max-w-xs">
-          <AlertTriangle className="w-8 h-8 text-zinc-700 mx-auto mb-2" />
-          <p className="font-mono text-[10px] text-zinc-500 mb-1">3D GLOBE UNAVAILABLE</p>
-          <p className="font-mono text-[9px] text-zinc-700 leading-relaxed">
-            {error}. Try Chrome/Firefox with hardware acceleration enabled.
-            The data table remains fully functional.
-          </p>
-        </div>
-      </div>
-    );
-  }
+    // Earth position (animated)
+    const earthAngle = t * 0.2;
+    const earthX = cx + earthR * Math.cos(earthAngle);
+    const earthY = cy + earthR * Math.sin(earthAngle);
+    ctx.fillStyle = "#4488ff";
+    ctx.beginPath();
+    ctx.arc(earthX, earthY, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(68,136,255,0.3)";
+    ctx.beginPath();
+    ctx.arc(earthX, earthY, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Draw orbits for threats
+    const matched = threats.filter((t) => t.sourceMatch === "BOTH").slice(0, 25);
+
+    for (let i = 0; i < matched.length; i++) {
+      const threat = matched[i];
+      const isSel = selected?.designation === threat.designation;
+
+      // Generate orbit parameters from object properties
+      const baseA = 0.5 + (i / matched.length) * 1.8;
+      const a = baseA * maxR * 0.4;
+      const e = 0.2 + Math.min(Math.abs(threat.palermoDelta) * 0.05, 0.5);
+      const orbitAngle = (i / matched.length) * Math.PI * 2 + t * 0.02;
+      const divergenceOffset = Math.min(Math.abs(threat.palermoDelta) * 1.5, 8);
+
+      const alpha = isSel ? 0.9 : 0.25;
+      const lineW = isSel ? 2 : 0.8;
+
+      // NASA orbit (cyan)
+      ctx.strokeStyle = `rgba(0,229,255,${alpha})`;
+      ctx.lineWidth = lineW;
+      ctx.beginPath();
+      for (let s = 0; s <= 100; s++) {
+        const theta = (s / 100) * Math.PI * 2;
+        const r = (a * (1 - e * e)) / (1 + e * Math.cos(theta));
+        const x = cx + r * Math.cos(theta + orbitAngle);
+        const y = cy + r * Math.sin(theta + orbitAngle) * 0.6;
+        if (s === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // ESA orbit (orange, offset by divergence)
+      ctx.strokeStyle = `rgba(255,109,0,${alpha * 0.8})`;
+      ctx.lineWidth = lineW * 0.8;
+      ctx.beginPath();
+      for (let s = 0; s <= 100; s++) {
+        const theta = (s / 100) * Math.PI * 2;
+        const r = (a * (1 - e * e)) / (1 + e * Math.cos(theta)) + divergenceOffset;
+        const x = cx + r * Math.cos(theta + orbitAngle + divergenceOffset * 0.005);
+        const y = cy + r * Math.sin(theta + orbitAngle + divergenceOffset * 0.005) * 0.6;
+        if (s === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Asteroid position on NASA orbit (animated)
+      const astAngle = t * (0.3 + i * 0.02) + i * 2.1;
+      const astR = (a * (1 - e * e)) / (1 + e * Math.cos(astAngle));
+      const astX = cx + astR * Math.cos(astAngle + orbitAngle);
+      const astY = cy + astR * Math.sin(astAngle + orbitAngle) * 0.6;
+
+      if (isSel) {
+        // Glow for selected
+        const glow = ctx.createRadialGradient(astX, astY, 0, astX, astY, 12);
+        glow.addColorStop(0, "rgba(255,255,255,0.6)");
+        glow.addColorStop(1, "rgba(255,255,255,0)");
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(astX, astY, 12, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Label
+        ctx.font = "10px monospace";
+        ctx.fillStyle = "rgba(255,255,255,0.9)";
+        ctx.fillText(threat.designation, astX + 10, astY - 8);
+        ctx.fillStyle = "rgba(255,100,100,0.8)";
+        ctx.fillText(`ΔPS: ${threat.palermoDelta.toFixed(2)}`, astX + 10, astY + 4);
+      }
+
+      ctx.fillStyle = isSel ? "#ffffff" : `rgba(0,229,255,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(astX, astY, isSel ? 4 : 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Divergence legend
+    ctx.font = "9px monospace";
+    ctx.fillStyle = "rgba(0,229,255,0.6)";
+    ctx.fillText("— NASA Sentry-II (Yarkovsky)", 12, H - 30);
+    ctx.fillStyle = "rgba(255,109,0,0.6)";
+    ctx.fillText("— ESA NEOCC/Aegis (Grav-only)", 12, H - 18);
+    ctx.fillStyle = "rgba(255,255,255,0.3)";
+    ctx.fillText("Gap = Palermo Scale divergence", 12, H - 6);
+
+    // Title
+    ctx.font = "bold 10px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.4)";
+    ctx.fillText("ORBITAL DIVERGENCE PROJECTION", 12, 16);
+    ctx.font = "8px monospace";
+    ctx.fillStyle = "rgba(255,255,255,0.2)";
+    ctx.fillText(`${matched.length} matched objects • Heliocentric ecliptic plane`, 12, 28);
+
+    timeRef.current += 0.016;
+    animRef.current = requestAnimationFrame(draw);
+  }, [threats, selected]);
+
+  useEffect(() => {
+    animRef.current = requestAnimationFrame(draw);
+    return () => cancelAnimationFrame(animRef.current);
+  }, [draw]);
 
   return (
-    <div className="w-full h-full relative">
-      {/* Container with explicit dimensions for WebGL */}
-      <div
-        ref={containerRef}
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          minWidth: "200px",
-          minHeight: "200px",
-        }}
+    <div className="w-full h-full relative bg-[#030308]">
+      <canvas
+        ref={canvasRef}
+        className="w-full h-full block"
+        style={{ width: "100%", height: "100%" }}
       />
-      {!ready && !error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-[#030308] z-10">
-          <div className="text-center">
-            <Orbit className="w-7 h-7 text-cyan-400 animate-spin mx-auto" style={{ animationDuration: "2s" }} />
-            <p className="font-mono text-[9px] text-zinc-700 mt-2">INITIALIZING WEBGL2...</p>
-          </div>
-        </div>
-      )}
-      {ready && (
-        <div className="absolute bottom-3 left-3 z-20 flex items-center gap-3">
-          <span className="flex items-center gap-1 text-[9px] font-mono text-cyan-400/70">
-            <span className="w-2 h-2 rounded-full bg-cyan-400 inline-block" /> NASA
-          </span>
-          <span className="flex items-center gap-1 text-[9px] font-mono text-orange-400/70">
-            <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" /> ESA
-          </span>
-          <span className="flex items-center gap-1 text-[9px] font-mono text-red-400/70">
-            <span className="w-3 h-0.5 bg-red-500 inline-block" /> Δr
-          </span>
-        </div>
-      )}
     </div>
   );
 }
