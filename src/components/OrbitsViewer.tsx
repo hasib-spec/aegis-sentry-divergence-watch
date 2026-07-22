@@ -3,14 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Orbit, AlertTriangle } from "lucide-react";
 import type { OrbitsViewerProps } from "@/lib/engine/types";
+import type { Entity, Viewer } from "cesium";
 
 export default function OrbitsViewer({
   threats,
   selected,
 }: OrbitsViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const viewerRef = useRef<unknown>(null);
-  const entitiesRef = useRef<unknown[]>([]);
+  const viewerRef = useRef<Viewer | null>(null);
+  const entitiesRef = useRef<Entity[]>([]);
   const [cesiumLoaded, setCesiumLoaded] = useState(false);
   const [cesiumError, setCesiumError] = useState<string | null>(null);
 
@@ -28,7 +29,7 @@ export default function OrbitsViewer({
         if (!mounted || !containerRef.current) return;
 
         if (viewerRef.current) {
-          (viewerRef.current as { destroy: () => void }).destroy();
+          viewerRef.current.destroy();
           viewerRef.current = null;
         }
 
@@ -48,14 +49,12 @@ export default function OrbitsViewer({
           baseLayer: false,
         });
 
-        // Dark globe
         viewer.scene.globe.baseColor =
           Cesium.Color.fromCssColorString("#0a1628");
         viewer.scene.backgroundColor =
           Cesium.Color.fromCssColorString("#030308");
         viewer.scene.globe.showGroundAtmosphere = false;
 
-        // Null-safe: these can be undefined in CesiumJS 1.122 types
         if (viewer.scene.skyAtmosphere) {
           viewer.scene.skyAtmosphere.show = false;
         }
@@ -66,7 +65,6 @@ export default function OrbitsViewer({
           viewer.scene.moon.show = false;
         }
 
-        // Try to add NaturalEarthII texture (non-blocking, graceful fallback)
         try {
           const provider =
             await Cesium.TileMapServiceImageryProvider.fromUrl(
@@ -76,7 +74,7 @@ export default function OrbitsViewer({
             new Cesium.ImageryLayer(provider, { alpha: 0.4 })
           );
         } catch {
-          // Globe stays dark if texture unavailable — acceptable
+          // Globe stays dark — acceptable fallback
         }
 
         viewer.camera.setView({
@@ -99,7 +97,7 @@ export default function OrbitsViewer({
       mounted = false;
       if (viewerRef.current) {
         try {
-          (viewerRef.current as { destroy: () => void }).destroy();
+          viewerRef.current.destroy();
         } catch {
           /* already destroyed */
         }
@@ -114,12 +112,11 @@ export default function OrbitsViewer({
     async function renderOrbits() {
       try {
         const Cesium = await import("cesium");
-        const viewer = viewerRef.current as InstanceType<
-          typeof Cesium.Viewer
-        >;
+        const viewer = viewerRef.current;
+        if (!viewer) return;
 
         for (const entity of entitiesRef.current) {
-          viewer.entities.remove(entity as Cesium.Entity);
+          viewer.entities.remove(entity);
         }
         entitiesRef.current = [];
 
@@ -228,7 +225,6 @@ export default function OrbitsViewer({
           }
         }
 
-        // Sun at origin
         const sun = viewer.entities.add({
           position: Cesium.Cartesian3.ZERO,
           point: {
