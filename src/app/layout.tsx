@@ -1,30 +1,16 @@
 import type { Metadata } from "next";
+import Script from "next/script";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "AEGIS-SENTRY | NASA vs ESA Asteroid Risk Divergence",
   description:
-    "Real-time scientific engine comparing NASA Sentry-II and ESA NEOCC/Aegis impact probability calculations. Keplerian propagation. Yarkovsky modeling. Palermo Scale recomputation.",
-  keywords: [
-    "planetary defense",
-    "asteroid",
-    "NASA Sentry",
-    "ESA NEOCC",
-    "Palermo Scale",
-    "Yarkovsky effect",
-    "orbital mechanics",
-  ],
+    "Real-time scientific engine comparing NASA Sentry-II and ESA NEOCC/Aegis impact probability calculations.",
   openGraph: {
     title: "AEGIS-SENTRY Divergence Watch",
     description:
       "Where NASA and ESA disagree on whether an asteroid will hit Earth.",
     type: "website",
-  },
-  twitter: {
-    card: "summary_large_image",
-    title: "AEGIS-SENTRY: NASA vs ESA Asteroid Risk Divergence",
-    description:
-      "Same rock. Two agencies. Different answers. Live scientific engine.",
   },
 };
 
@@ -35,10 +21,20 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className="min-h-screen bg-void text-zinc-200 antialiased grid-overlay">
+      <head>
+        <link
+          href="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Widgets/widgets.css"
+          rel="stylesheet"
+        />
+      </head>
+      <body className="min-h-screen bg-[#030308] text-zinc-200 antialiased">
+        <Script
+          src="https://cesium.com/downloads/cesiumjs/releases/1.122/Build/Cesium/Cesium.js"
+          strategy="beforeInteractive"
+        />
         <div className="fixed inset-0 pointer-events-none z-0">
-          <div className="absolute top-0 left-1/4 w-96 h-96 bg-nasa/5 rounded-full blur-[128px]" />
-          <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-esa/5 rounded-full blur-[128px]" />
+          <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-cyan-500/[0.03] rounded-full blur-[150px]" />
+          <div className="absolute bottom-0 right-1/4 w-[500px] h-[500px] bg-orange-500/[0.03] rounded-full blur-[150px]" />
         </div>
         <main className="relative z-10">{children}</main>
       </body>
