@@ -1,5 +1,7 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21505692.svg)](https://doi.org/10.5281/zenodo.21505692)
+
 # AEGIS·SENTRY — Planetary Defense Readiness Engine
-https://zenodo.org/badge/1308482816.svg
+
 > Real-time NASA Sentry-II vs ESA NEOCC/Aegis asteroid risk divergence,
 > quantified live. Yarkovsky sensitivity. Keyhole alerts. Impact corridors.
 > Deflection planning. Rubin LSST triage.
