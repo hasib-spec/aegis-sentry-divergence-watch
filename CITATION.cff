@@ -1,0 +1,20 @@
+cff-version: 1.2.0
+message: "If you use this software in your research or orbital mechanics analysis, please cite it as below."
+authors:
+  - family-names: "Ahmad"
+    given-names: "Haseeb"
+title: "AEGIS-SENTRY: Dual-Agency Orbital Mechanics and Planetary Defense Simulation Engine"
+version: "1.0.0"
+doi: "10.5281/zenodo.21505692"
+date-released: 2026-07-23
+repository-code: "https://github.com/hasib-spec/aegis-sentry-divergence-watch"
+url: "https://aegis-sentry-divergence-watch-alpha.vercel.app/"
+keywords:
+  - "orbital mechanics"
+  - "planetary defense"
+  - "near-earth objects"
+  - "yarkovsky effect"
+  - "nasa sentry"
+  - "esa neocc"
+  - "astrophysics"
+license: "AGPL-3.0"
