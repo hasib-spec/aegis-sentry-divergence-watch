@@ -40,6 +40,18 @@ Deployed on Vercel (iad1). All data from public NASA/ESA APIs.
 - Chodas (2015) — Gravitational keyholes
 - Thomas et al. (2023) — DART β = 3.61
 - NASA OIG IG-25-006 — Planetary defense gaps
+---
+
+## ⚖️ License & Commercial Licensing
+
+This repository is dual-licensed:
+
+1. **Open-Source (GNU AGPLv3):** Free for academic researchers, universities, non-profit institutions, and open-source developers. Any derivative works, modified versions, or network-deployed instances must remain open-source under the terms of the [GNU Affero General Public License v3.0](LICENSE).
+2. **Commercial License:** Required for commercial space operators, defense contractors, hedge funds, or private enterprises seeking closed-source integration, proprietary modifications, or dedicated SLAs without AGPLv3 copyleft restrictions.
+
+For commercial licensing inquiries or custom deployment support, please contact: `haedu59@gmail.com`
+
+
 
 ## ⚠️ Disclaimer
 
